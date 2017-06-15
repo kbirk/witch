@@ -54,7 +54,7 @@ func (w *Watcher) ScanForEvents() ([]Event, error) {
 	return w.scanAndCheck()
 }
 
-// ScanForChange returns true if any events occured since the last scan.
+// ScanForChange returns true if any events occurred since the last scan.
 func (w *Watcher) ScanForChange() (bool, error) {
 	return w.scanAndCheckBool()
 }
