@@ -23,7 +23,7 @@ func init() {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
-		for _ = range c {
+		for range c {
 			for _, handler := range handlers {
 				handler()
 			}
