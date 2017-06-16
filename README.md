@@ -5,6 +5,8 @@
 [![Build Status](https://travis-ci.org/unchartedsoftware/witch.svg?branch=master)](https://travis-ci.org/unchartedsoftware/witch)
 [![Go Report Card](https://goreportcard.com/badge/github.com/unchartedsoftware/witch)](https://goreportcard.com/report/github.com/unchartedsoftware/witch)
 
+<img width="600" src="https://rawgit.com/unchartedsoftware/witch/master/screenshot.png" alt="screenshot" />
+
 ## Description
 
 Detect changes to files or directories and executes the provided command. Uses polling to work consistently across multiple platforms. Supports double-star globbing.
