@@ -18,7 +18,7 @@ import (
 
 const (
 	name    = "witch"
-	version = "0.2.0"
+	version = "0.2.1"
 )
 
 var (
@@ -102,9 +102,8 @@ func killCmd() {
 	if prev != nil {
 		err := syscall.Kill(-prev.Process.Pid, syscall.SIGKILL)
 		if err != nil {
-			writeToErr("failed to kill prev running cmd: ", err)
+			writeToErr("failed to kill prev running cmd: %s", err)
 		}
-		prev = nil
 	}
 	mu.Unlock()
 }
@@ -138,6 +137,10 @@ func executeCmd(cmd string) error {
 		if err != nil {
 			writeToErr("cmd encountered error: %s", err)
 		}
+		// clear prev
+		mu.Lock()
+		prev = nil
+		mu.Unlock()
 		// flag we are ready
 		ready <- true
 	}()
