@@ -35,7 +35,7 @@ Command-line args:
 --watch
 	- Comma separated file and directory globs to watch (default: ".")
 --ignore
-	- Comma separated file and directory globs to ignore (default: ".*")
+	- Comma separated file and directory globs to ignore (default: "")
 --interval
 	- Watch scan interval, in milliseconds (default: 400)
 ```
