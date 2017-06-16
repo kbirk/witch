@@ -170,6 +170,13 @@ func main() {
 		w.Ignore(arg)
 	}
 
+	// check for inital target count
+	numTargets, err := w.NumTargets()
+	if err != nil {
+		writeToErr("failed to run scan: %s", err)
+	}
+	writeToOut("found %d targets", numTargets)
+
 	// gracefully shutdown cmd process on exit
 	graceful.OnSignal(func() {
 		// kill process
@@ -188,8 +195,20 @@ func main() {
 			writeToErr("failed to run scan: %s", err)
 		}
 		// log changes
+		prevTargets := numTargets
 		for _, event := range events {
-			writeToOut(changeString(event.Info.Name(), event.Type))
+			writeToOut(changeString(event.Target.Path, event.Type))
+			// update num targets
+			if event.Type == watcher.Added {
+				numTargets++
+			}
+			if event.Type == watcher.Removed {
+				numTargets--
+			}
+		}
+		// log new target count
+		if prevTargets != numTargets {
+			writeToOut("now watching %d targets", numTargets)
 		}
 		// if so, execute command
 		if len(events) > 0 {
