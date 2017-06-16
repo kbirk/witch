@@ -1,10 +1,12 @@
 package watcher
 
 import (
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 
+	"github.com/bmatcuk/doublestar"
 	"github.com/pkg/errors"
 )
 
@@ -16,9 +18,6 @@ const (
 	// Removed represents a file removal event.
 	Removed = "removed"
 )
-
-// Op describe what type of event has occurred during the watching process.
-type Op uint32
 
 // Watcher represents a simple struct for scanning and checking for any changes
 // that occur in a set of watched files and directories.
@@ -59,12 +58,7 @@ func (w *Watcher) Ignore(arg string) {
 // ScanForEvents returns any events that occurred since the last scan.
 func (w *Watcher) ScanForEvents() ([]*Event, error) {
 	// get all current watches
-	watches, err := w.getWatches()
-	if err != nil {
-		return nil, err
-	}
-	// scan for current targets
-	targets, err := w.scan(watches)
+	targets, err := w.getWatches()
 	if err != nil {
 		return nil, err
 	}
@@ -75,12 +69,7 @@ func (w *Watcher) ScanForEvents() ([]*Event, error) {
 // ScanForChange returns true if any events occurred since the last scan.
 func (w *Watcher) ScanForChange() (bool, error) {
 	// get all current watches
-	watches, err := w.getWatches()
-	if err != nil {
-		return false, err
-	}
-	// scan for current targets
-	targets, err := w.scan(watches)
+	targets, err := w.getWatches()
 	if err != nil {
 		return false, err
 	}
@@ -91,12 +80,7 @@ func (w *Watcher) ScanForChange() (bool, error) {
 // NumTargets returns the number of currently watched targets.
 func (w *Watcher) NumTargets() (uint64, error) {
 	// get all current watches
-	watches, err := w.getWatches()
-	if err != nil {
-		return 0, err
-	}
-	// scan for current targets
-	targets, err := w.scan(watches)
+	targets, err := w.getWatches()
 	if err != nil {
 		return 0, err
 	}
@@ -107,14 +91,14 @@ func (w *Watcher) NumTargets() (uint64, error) {
 func (w *Watcher) expandArgs(args []string) (map[string]*Target, error) {
 	results := make(map[string]*Target)
 	for _, arg := range args {
-		paths, err := filepath.Glob(arg)
+		paths, err := doublestar.Glob(arg)
 		if err != nil {
-			return nil, errors.Wrap(err, "unable to expand glob")
+			return nil, errors.Wrap(err, fmt.Sprintf("unable to expand glob %s", arg))
 		}
 		for _, path := range paths {
 			fullpath, err := filepath.Abs(path)
 			if err != nil {
-				return nil, errors.Wrap(err, "unable to get absolute path")
+				return nil, errors.Wrap(err, fmt.Sprintf("unable to get absolute path for %s", path))
 			}
 			results[fullpath] = &Target{
 				Path:     path,
@@ -125,42 +109,21 @@ func (w *Watcher) expandArgs(args []string) (map[string]*Target, error) {
 	return results, nil
 }
 
-func (w *Watcher) getWatches() ([]*Target, error) {
-	// expand watches
-	watches, err := w.expandArgs(w.watches)
-	if err != nil {
-		return nil, errors.Wrap(err, "unable to expand watched arguments")
-	}
-	// expand ignores
-	ignores, err := w.expandArgs(w.ignores)
-	if err != nil {
-		return nil, errors.Wrap(err, "unable to expand ignored arguments")
-	}
-	// remove ignores from watches
-	var result []*Target
-	for fullpath, target := range watches {
-		_, ok := ignores[fullpath]
-		if !ok {
-			result = append(result, target)
-		}
-	}
-	return result, nil
-}
-
-func (w *Watcher) scan(targets []*Target) (map[string]*Target, error) {
-	result := make(map[string]*Target)
+func (w *Watcher) scan(targets map[string]*Target) (map[string]*Target, error) {
+	results := make(map[string]*Target)
 	for _, target := range targets {
 		// make sure the path exists
 		info, err := os.Stat(target.Fullpath)
 		if err != nil {
-			return nil, errors.Wrap(err, "unable to find watched file")
+			// can't find file
+			continue
 		}
 		// if it's not a directory, skip to next path
 		if !info.IsDir() {
 			// append info
 			target.info = info
 			// add to map
-			result[target.Fullpath] = target
+			results[target.Fullpath] = target
 			continue
 		}
 		// read directory contents
@@ -169,14 +132,14 @@ func (w *Watcher) scan(targets []*Target) (map[string]*Target, error) {
 			return nil, errors.Wrap(err, "unable read dir")
 		}
 		// for each child
-		var subtargets []*Target
+		subtargets := make(map[string]*Target)
 		for _, info := range infos {
 			// create sub-target
-			subtarget := &Target{
+			fullpath := filepath.Join(target.Fullpath, info.Name())
+			subtargets[fullpath] = &Target{
 				Path:     filepath.Join(target.Path, info.Name()),
-				Fullpath: filepath.Join(target.Fullpath, info.Name()),
+				Fullpath: fullpath,
 			}
-			subtargets = append(subtargets, subtarget)
 		}
 		// scan children recursively
 		children, err := w.scan(subtargets)
@@ -185,7 +148,39 @@ func (w *Watcher) scan(targets []*Target) (map[string]*Target, error) {
 		}
 		// add to result
 		for subpath, subtarget := range children {
-			result[subpath] = subtarget
+			results[subpath] = subtarget
+		}
+	}
+	return results, nil
+}
+
+func (w *Watcher) scanTargets(args []string) (map[string]*Target, error) {
+	// expand args
+	targets, err := w.expandArgs(args)
+	if err != nil {
+		return nil, err
+	}
+	// scan for all targets
+	return w.scan(targets)
+}
+
+func (w *Watcher) getWatches() (map[string]*Target, error) {
+	// expand watches
+	watches, err := w.scanTargets(w.watches)
+	if err != nil {
+		return nil, err
+	}
+	// expand ignores
+	ignores, err := w.scanTargets(w.ignores)
+	if err != nil {
+		return nil, err
+	}
+	// remove ignores from watches
+	result := make(map[string]*Target)
+	for fullpath, target := range watches {
+		_, ok := ignores[fullpath]
+		if !ok {
+			result[fullpath] = target
 		}
 	}
 	return result, nil
@@ -258,4 +253,26 @@ func (w *Watcher) checkBool(latest map[string]*Target) bool {
 	}
 	w.prev = latest
 	return false
+}
+
+func isSubDir(child, parent string) bool {
+	rel, err := filepath.Rel(child, parent)
+	if err != nil {
+		return false
+	}
+	return filepath.HasPrefix(rel, "..")
+}
+
+func removeDuplicates(s []int) []int {
+	seen := make(map[int]struct{}, len(s))
+	j := 0
+	for _, v := range s {
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		s[j] = v
+		j++
+	}
+	return s[:j]
 }

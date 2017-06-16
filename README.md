@@ -21,21 +21,25 @@ go get github.com/unchartedsoftware/witch
 
 ## Usage
 
+```bash
+witch --cmd=<shell-command> [--watch="<glob>,..."] [--ignore="<glob>,..."] [--interval=<milliseconds>]
+```
+
 Command-line args:
 
-```
--watch
-	comma separated globs to watch.
--ignore
-	comma separated globs to ignore.
--interval
-	watcher poll interval in milliseconds (default=400).
--cmd
-	shell command to execute on startup and changes.
+```bash
+--cmd
+	- Shell command to run after detected changes
+--watch
+	- Comma separated file and directory globs to watch (default: ".")
+--ignore
+	- Comma separated file and directory globs to ignore (default: ".*")
+--interval
+	- Watch scan interval, in milliseconds (default: 400)
 ```
 
 ## Example
 
 ```bash
-witch -watch="./**/*.go" -ignore="vendor" -cmd="make lint && make fmt && make run"
+witch --cmd="make lint && make fmt && make run" --watch="**/*.go" --ignore="vendor"
 ```

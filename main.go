@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,15 +9,14 @@ import (
 	"time"
 
 	"github.com/fatih/color"
+	"github.com/urfave/cli"
 
 	"github.com/unchartedsoftware/witch/graceful"
 	"github.com/unchartedsoftware/witch/watcher"
 )
 
 const (
-	logo = `
-        \    / o _|_  _ |_
-         \/\/  |  |_ (_ | |`
+	version = "0.1.0"
 )
 
 var (
@@ -30,10 +28,17 @@ var (
 	mu       = &sync.Mutex{}
 )
 
+func createLogo() string {
+	return color.GreenString("\n        \\    / ") +
+		color.MagentaString("★") +
+		color.GreenString(" _|_  _ |_\n         ") +
+		color.GreenString("\\/\\/  |  |_ |_ | |\n\n        ") +
+		color.BlackString("version "+version+"\n\n")
+}
+
 func writeToErr(format string, args ...interface{}) {
 	stamp := color.BlackString("[%s]", time.Now().Format(time.Stamp))
 	name := color.GreenString("[witch]")
-	//carot := color.MagentaString("★")
 	msg := color.BlackString("- %s", fmt.Sprintf(format, args...))
 	fmt.Fprintf(os.Stderr, "%s %s %s\n", stamp, name, msg)
 }
@@ -41,15 +46,41 @@ func writeToErr(format string, args ...interface{}) {
 func writeToOut(format string, args ...interface{}) {
 	stamp := color.BlackString("[%s]", time.Now().Format(time.Stamp))
 	name := color.GreenString("[witch]")
-	//carot := color.MagentaString("★")
 	msg := color.BlackString("- %s", fmt.Sprintf(format, args...))
 	fmt.Fprintf(os.Stdout, "%s %s %s\n", stamp, name, msg)
 }
 
 func changeString(path string, event string) string {
-	star := color.MagentaString("★")
-	msg := color.BlackString(fmt.Sprintf("%s %s", path, event))
-	return fmt.Sprintf("%s %s %s  %s %s %s %s", star, star, star, msg, star, star, star)
+	switch event {
+	case watcher.Added:
+		return fmt.Sprintf("%s %s",
+			color.BlackString(path),
+			color.GreenString(event))
+	case watcher.Removed:
+		return fmt.Sprintf("%s %s",
+			color.BlackString(path),
+			color.RedString(event))
+	}
+	return fmt.Sprintf("%s %s",
+		color.BlackString(path),
+		color.BlueString(event))
+}
+
+func countString(count uint64) string {
+	switch count {
+	case 0:
+		return color.BlackString("no files found")
+	case 1:
+		return fmt.Sprintf("%s %s %s",
+			color.BlackString("watching"),
+			color.CyanString(fmt.Sprintf("%d", count)),
+			color.BlackString("file"))
+	}
+	return fmt.Sprintf("%s %s %s",
+		color.BlackString("watching"),
+		color.CyanString(fmt.Sprintf("%d", count)),
+		color.BlackString("files"))
+
 }
 
 func splitAndTrim(arg string) []string {
@@ -62,34 +93,6 @@ func splitAndTrim(arg string) []string {
 		res = append(res, strings.TrimSpace(str))
 	}
 	return res
-}
-
-func parseCLI() error {
-
-	// define flags
-	w := flag.String("watch", "", "Files and directories to watch")
-	i := flag.String("ignore", "", "Files and directories  to ignore")
-	c := flag.String("cmd", "", "Command to run after changes")
-	in := flag.Int("interval", 400, "Watch interval in milliseconds")
-	// parse the flags
-	flag.Parse()
-	// ensure we have watch targets
-	if *w == "" {
-		return fmt.Errorf("no `watch` targets provided, there must be at least one file / directory")
-	}
-	watch = splitAndTrim(*w)
-	// ensure we have a command
-	if *c == "" {
-		return fmt.Errorf("no `cmd` string provided, what is the point of a watch if it does nothing?")
-	}
-	cmd = *c
-	// ignores are optional
-	if *i != "" {
-		ignore = splitAndTrim(*i)
-	}
-	// set interval
-	interval = *in
-	return nil
 }
 
 func killCmd() {
@@ -119,7 +122,7 @@ func executeCmd(cmd string) error {
 	c.Stderr = os.Stderr
 
 	// log cmd
-	writeToOut("executing %s", color.BlueString(cmd))
+	writeToOut("executing %s", color.MagentaString(cmd))
 
 	// run command in another process
 	err := c.Start()
@@ -144,80 +147,126 @@ func executeCmd(cmd string) error {
 }
 
 func main() {
-	// log logo
-	fmt.Fprintf(os.Stdout, color.GreenString(logo))
-	fmt.Fprintf(os.Stdout, "\n\n")
-
-	// parse command line flags
-	err := parseCLI()
-	if err != nil {
-		writeToErr("unable to parse flags:", err)
-		os.Exit(1)
+	app := cli.NewApp()
+	app.Name = "witch"
+	app.Version = version
+	app.Usage = "Dead simple watching"
+	app.UsageText = "witch --cmd=<shell-command> [--watch=\"<glob>,...\"] [--ignore=\"<glob>,...\"] [--interval=<milliseconds>]"
+	app.Flags = []cli.Flag{
+		cli.StringFlag{
+			Name:  "cmd",
+			Value: "",
+			Usage: "Shell command to run after detected changes",
+		},
+		cli.StringFlag{
+			Name:  "watch",
+			Value: ".",
+			Usage: "Comma separated file and directory globs to watch",
+		},
+		cli.StringFlag{
+			Name:  "ignore",
+			Value: ".*",
+			Usage: "Comma separated file and directory globs to ignore",
+		},
+		cli.IntFlag{
+			Name:  "interval",
+			Value: 400,
+			Usage: "Watch scan interval, in milliseconds",
+		},
 	}
+	app.Action = func(c *cli.Context) error {
 
-	// create the watcher
-	w := watcher.New()
+		// validate command line flags
 
-	// add watches
-	for _, arg := range watch {
-		writeToOut("watching %s", color.MagentaString(arg))
-		w.Watch(arg)
-	}
+		// ensure we have a command
+		if c.String("cmd") == "" {
+			return cli.NewExitError("No `--cmd` argument provided, Set command to execute with `--cmd=\"<shell command>\"`", 2)
+		}
+		cmd = c.String("cmd")
 
-	// add ignores first
-	for _, arg := range ignore {
-		writeToOut("ignoring %s", color.RedString(arg))
-		w.Ignore(arg)
-	}
+		// watch targets are optional
+		if c.String("watch") == "" {
+			return cli.NewExitError("No `--watch` arguments provided. Set watch targets with `--watch=\"<comma>,<separated>,<globs>...\"`", 1)
+		}
+		watch = splitAndTrim(c.String("watch"))
 
-	// check for inital target count
-	numTargets, err := w.NumTargets()
-	if err != nil {
-		writeToErr("failed to run scan: %s", err)
-	}
-	writeToOut("found %d targets", numTargets)
+		// ignores are optional
+		if c.String("ignore") != "" {
+			ignore = splitAndTrim(c.String("ignore"))
+		}
 
-	// gracefully shutdown cmd process on exit
-	graceful.OnSignal(func() {
-		// kill process
-		killCmd()
-		os.Exit(0)
-	})
+		// interval is optional
+		interval = c.Int("interval")
 
-	// launch cmd process
-	executeCmd(cmd)
+		// print logo
+		fmt.Fprintf(os.Stdout, createLogo())
 
-	// start scan loop
-	for {
-		// check if anything has changed
-		events, err := w.ScanForEvents()
+		// create the watcher
+		w := watcher.New()
+
+		// add watches
+		for _, arg := range watch {
+			writeToOut("watching %s", color.BlueString(arg))
+			w.Watch(arg)
+		}
+
+		// add ignores first
+		for _, arg := range ignore {
+			writeToOut("ignoring %s", color.RedString(arg))
+			w.Ignore(arg)
+		}
+
+		// check for inital target count
+		numTargets, err := w.NumTargets()
 		if err != nil {
 			writeToErr("failed to run scan: %s", err)
 		}
-		// log changes
-		prevTargets := numTargets
-		for _, event := range events {
-			writeToOut(changeString(event.Target.Path, event.Type))
-			// update num targets
-			if event.Type == watcher.Added {
-				numTargets++
-			}
-			if event.Type == watcher.Removed {
-				numTargets--
-			}
-		}
-		// log new target count
-		if prevTargets != numTargets {
-			writeToOut("now watching %d targets", numTargets)
-		}
-		// if so, execute command
-		if len(events) > 0 {
-			err := executeCmd(cmd)
+		writeToOut(countString(numTargets))
+
+		// gracefully shutdown cmd process on exit
+		graceful.OnSignal(func() {
+			// kill process
+			killCmd()
+			os.Exit(0)
+		})
+
+		// launch cmd process
+		executeCmd(cmd)
+
+		// start scan loop
+		for {
+			// check if anything has changed
+			events, err := w.ScanForEvents()
 			if err != nil {
-				writeToErr("failed to run cmd: %s", err)
+				writeToErr("failed to run scan: %s", err)
 			}
+			// log changes
+			prevTargets := numTargets
+			for _, event := range events {
+				writeToOut(changeString(event.Target.Path, event.Type))
+				// update num targets
+				if event.Type == watcher.Added {
+					numTargets++
+				}
+				if event.Type == watcher.Removed {
+					numTargets--
+				}
+			}
+			// log new target count
+			if prevTargets != numTargets {
+				writeToOut(countString(numTargets))
+			}
+			// if so, execute command
+			if len(events) > 0 {
+				err := executeCmd(cmd)
+				if err != nil {
+					writeToErr("failed to run cmd: %s", err)
+				}
+			}
+			// sleep
+			time.Sleep(time.Millisecond * time.Duration(interval))
 		}
-		// sleep
-		time.Sleep(time.Millisecond * time.Duration(interval))
 	}
+	// run app
+	app.Run(os.Args)
 }
