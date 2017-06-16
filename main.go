@@ -17,7 +17,8 @@ import (
 )
 
 const (
-	version = "0.1.1"
+	name    = "witch"
+	version = "0.2.0"
 )
 
 var (
@@ -35,12 +36,12 @@ func createLogo() string {
 		color.MagentaString("★") +
 		color.GreenString(" _|_  _ |_\n         ") +
 		color.GreenString("\\/\\/  |  |_ |_ | |\n\n        ") +
-		color.BlackString("version "+version+"\n\n")
+		color.BlackString("version %s\n\n", version)
 }
 
 func writeToErr(format string, args ...interface{}) {
 	stamp := color.BlackString("[%s]", time.Now().Format(time.Stamp))
-	name := color.GreenString("[witch]")
+	name := color.GreenString("[%s]", name)
 	msg := color.BlackString("- %s", fmt.Sprintf(format, args...))
 	fmt.Fprintf(os.Stderr, "%s %s %s\n", stamp, name, msg)
 }
@@ -52,7 +53,7 @@ func writeToOut(format string, args ...interface{}) {
 	fmt.Fprintf(os.Stdout, "%s %s %s\n", stamp, name, msg)
 }
 
-func changeString(path string, event string) string {
+func fileChangeString(path string, event string) string {
 	switch event {
 	case watcher.Added:
 		return fmt.Sprintf("%s %s",
@@ -68,21 +69,20 @@ func changeString(path string, event string) string {
 		color.BlueString(event))
 }
 
-func countString(count uint64) string {
+func fileCountString(count uint64) string {
 	switch count {
 	case 0:
 		return color.BlackString("no files found")
 	case 1:
 		return fmt.Sprintf("%s %s %s",
 			color.BlackString("watching"),
-			color.CyanString(fmt.Sprintf("%d", count)),
+			color.CyanString("%d", count),
 			color.BlackString("file"))
 	}
 	return fmt.Sprintf("%s %s %s",
 		color.BlackString("watching"),
-		color.CyanString(fmt.Sprintf("%d", count)),
+		color.CyanString("%d", count),
 		color.BlackString("files"))
-
 }
 
 func splitAndTrim(arg string) []string {
@@ -151,7 +151,7 @@ func executeCmd(cmd string) error {
 
 func main() {
 	app := cli.NewApp()
-	app.Name = "witch"
+	app.Name = name
 	app.Version = version
 	app.Usage = "Dead simple watching"
 	app.UsageText = "witch --cmd=<shell-command> [--watch=\"<glob>,...\"] [--ignore=\"<glob>,...\"] [--interval=<milliseconds>]"
@@ -168,7 +168,7 @@ func main() {
 		},
 		cli.StringFlag{
 			Name:  "ignore",
-			Value: ".*",
+			Value: "",
 			Usage: "Comma separated file and directory globs to ignore",
 		},
 		cli.IntFlag{
@@ -183,13 +183,13 @@ func main() {
 
 		// ensure we have a command
 		if c.String("cmd") == "" {
-			return cli.NewExitError("No `--cmd` argument provided, Set command to execute with `--cmd=\"<shell command>\"`", 2)
+			return cli.NewExitError("No `--cmd` argument provided, Set command to execute with `--cmd=\"<shell command>\"`", 1)
 		}
 		cmd = c.String("cmd")
 
 		// watch targets are optional
 		if c.String("watch") == "" {
-			return cli.NewExitError("No `--watch` arguments provided. Set watch targets with `--watch=\"<comma>,<separated>,<globs>...\"`", 1)
+			return cli.NewExitError("No `--watch` arguments provided. Set watch targets with `--watch=\"<comma>,<separated>,<globs>...\"`", 2)
 		}
 		watch = splitAndTrim(c.String("watch"))
 
@@ -222,9 +222,9 @@ func main() {
 		// check for initial target count
 		numTargets, err := w.NumTargets()
 		if err != nil {
-			writeToErr("failed to run scan: %s", err)
+			return cli.NewExitError(fmt.Sprintf("Failed to run initial scan: %s", err), 3)
 		}
-		writeToOut(countString(numTargets))
+		writeToOut(fileCountString(numTargets))
 
 		// gracefully shutdown cmd process on exit
 		graceful.OnSignal(func() {
@@ -249,7 +249,7 @@ func main() {
 			// log changes
 			prevTargets := numTargets
 			for _, event := range events {
-				writeToOut(changeString(event.Target.Path, event.Type))
+				writeToOut(fileChangeString(event.Target.Path, event.Type))
 				// update num targets
 				if event.Type == watcher.Added {
 					numTargets++
@@ -260,7 +260,7 @@ func main() {
 			}
 			// log new target count
 			if prevTargets != numTargets {
-				writeToOut(countString(numTargets))
+				writeToOut(fileCountString(numTargets))
 			}
 			// if so, execute command
 			if len(events) > 0 {

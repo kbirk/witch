@@ -1,8 +1,6 @@
-hash: f6ef91174764a42592cbc4cd353ea5479e051e2afe6ed9d4e17579ee1a10de8d
-updated: 2017-06-15T22:54:44.450900555-04:00
+hash: 39a9125f138c551bed86c024daaa484448a313ca6109c013f790850d634e103c
+updated: 2017-06-16T12:26:15.770029008-04:00
 imports:
-- name: github.com/bmatcuk/doublestar
-  version: dd6a6f0a8cdfaaa88b08cf26cf1bc7d69003ee13
 - name: github.com/fatih/color
   version: 62e9147c64a1ed519147b62a56a14e83e2be02c1
 - name: github.com/mattn/go-colorable

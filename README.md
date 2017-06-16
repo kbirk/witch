@@ -27,7 +27,7 @@ witch --cmd=<shell-command> [--watch="<glob>,..."] [--ignore="<glob>,..."] [--in
 
 Command-line args:
 
-```bash
+```
 --cmd
 	- Shell command to run after detected changes
 --watch
@@ -41,5 +41,5 @@ Command-line args:
 ## Example
 
 ```bash
-witch --cmd="make lint && make fmt && make run" --watch="**/*.go" --ignore="vendor"
+witch --cmd="make lint && make fmt && make run" --watch="main.go,api/**/*.go"
 ```
