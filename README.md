@@ -7,7 +7,7 @@
 
 ## Description
 
-Detect changes to files or directories and executes the provided command. Uses polling to consistently work across multiple platforms. Supports globbing.
+Detect changes to files or directories and executes the provided command. Uses polling to work consistently across multiple platforms. Supports double-star globbing.
 
 ## Dependencies
 
