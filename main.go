@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/fatih/color"
@@ -16,7 +17,7 @@ import (
 )
 
 const (
-	version = "0.1.0"
+	version = "0.1.1"
 )
 
 var (
@@ -25,6 +26,7 @@ var (
 	cmd      string
 	interval int
 	prev     *exec.Cmd
+	ready    = make(chan bool, 1)
 	mu       = &sync.Mutex{}
 )
 
@@ -98,10 +100,11 @@ func splitAndTrim(arg string) []string {
 func killCmd() {
 	mu.Lock()
 	if prev != nil {
-		err := prev.Process.Kill()
+		err := syscall.Kill(-prev.Process.Pid, syscall.SIGKILL)
 		if err != nil {
 			writeToErr("failed to kill prev running cmd: ", err)
 		}
+		prev = nil
 	}
 	mu.Unlock()
 }
@@ -110,13 +113,12 @@ func executeCmd(cmd string) error {
 	// kill prev process
 	killCmd()
 
-	// lock
-	mu.Lock()
-	defer mu.Unlock()
+	// wait until ready
+	<-ready
 
 	// create command
-	c := exec.Command("sh", "-c", cmd)
-	//c := exec.Command("/bin/sh", cmd)
+	c := exec.Command("/bin/sh", "-c", cmd)
+	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
@@ -132,17 +134,18 @@ func executeCmd(cmd string) error {
 
 	// wait on process
 	go func() {
-		err := c.Wait()
+		_, err := c.Process.Wait()
 		if err != nil {
 			writeToErr("cmd encountered error: %s", err)
 		}
-		mu.Lock()
-		prev = nil
-		mu.Unlock()
+		// flag we are ready
+		ready <- true
 	}()
 
 	// store process
+	mu.Lock()
 	prev = c
+	mu.Unlock()
 	return nil
 }
 
@@ -216,7 +219,7 @@ func main() {
 			w.Ignore(arg)
 		}
 
-		// check for inital target count
+		// check for initial target count
 		numTargets, err := w.NumTargets()
 		if err != nil {
 			writeToErr("failed to run scan: %s", err)
@@ -229,6 +232,9 @@ func main() {
 			killCmd()
 			os.Exit(0)
 		})
+
+		// flag that we are ready to launch process
+		ready <- true
 
 		// launch cmd process
 		executeCmd(cmd)
