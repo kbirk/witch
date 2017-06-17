@@ -24,18 +24,19 @@ const (
 )
 
 var (
-	watch     []string
-	ignore    []string
-	cmd       string
-	interval  int
-	prev      *exec.Cmd
-	ready     = make(chan bool, 1)
-	mu        = &sync.Mutex{}
-	prettyOut = writer.NewPretty(name, os.Stdout)
-	prettyErr = writer.NewPretty(name, os.Stderr)
-	cmdOut    = writer.NewCmd(os.Stdout)
-	cmdErr    = writer.NewCmd(os.Stderr)
-	spin      = spinner.New(prettyOut)
+	watch         []string
+	ignore        []string
+	cmd           string
+	watchInterval int
+	tickInterval  = 100
+	prev          *exec.Cmd
+	ready         = make(chan bool, 1)
+	mu            = &sync.Mutex{}
+	prettyOut     = writer.NewPretty(name, os.Stdout)
+	prettyErr     = writer.NewPretty(name, os.Stderr)
+	cmdOut        = writer.NewCmd(os.Stdout)
+	cmdErr        = writer.NewCmd(os.Stderr)
+	spin          = spinner.New(prettyOut)
 )
 
 func createLogo() string {
@@ -69,12 +70,12 @@ func fileCountString(count uint64) string {
 	case 1:
 		return fmt.Sprintf("%s %s %s",
 			color.BlackString("watching"),
-			color.CyanString("%d", count),
+			color.BlueString("%d", count),
 			color.BlackString("file"))
 	}
 	return fmt.Sprintf("%s %s %s",
 		color.BlackString("watching"),
-		color.CyanString("%d", count),
+		color.BlueString("%d", count),
 		color.BlackString("files"))
 }
 
@@ -168,9 +169,9 @@ func main() {
 			Usage: "Comma separated file and directory globs to ignore",
 		},
 		cli.IntFlag{
-			Name:  "interval",
+			Name:  "watchInterval",
 			Value: 400,
-			Usage: "Watch scan interval, in milliseconds",
+			Usage: "Watch scan watchInterval, in milliseconds",
 		},
 	}
 	app.Action = func(c *cli.Context) error {
@@ -194,8 +195,8 @@ func main() {
 			ignore = splitAndTrim(c.String("ignore"))
 		}
 
-		// interval is optional
-		interval = c.Int("interval")
+		// watchInterval is optional
+		watchInterval = c.Int("watchInterval")
 
 		// print logo
 		fmt.Fprintf(os.Stdout, createLogo())
@@ -220,6 +221,7 @@ func main() {
 		if err != nil {
 			return cli.NewExitError(fmt.Sprintf("Failed to run initial scan: %s", err), 3)
 		}
+		prettyOut.WriteStringf("%s\n", fileCountString(numTargets))
 
 		// gracefully shutdown cmd process on exit
 		graceful.OnSignal(func() {
@@ -235,35 +237,75 @@ func main() {
 		// launch cmd process
 		executeCmd(cmd)
 
+		// track which action to take
+		nextWatch := watchInterval
+		nextTick := tickInterval
+
 		// start scan loop
 		for {
-			// check if anything has changed
-			events, err := w.ScanForEvents()
-			if err != nil {
-				prettyErr.WriteStringf("failed to run scan: %s\n", err)
-			}
-			// log changes
-			for _, event := range events {
-				prettyOut.WriteStringf("%s\n", fileChangeString(event.Target.Path, event.Type))
-				// update num targets
-				if event.Type == watcher.Added {
-					numTargets++
-				}
-				if event.Type == watcher.Removed {
-					numTargets--
-				}
-			}
-			// if so, execute command
-			if len(events) > 0 {
-				err := executeCmd(cmd)
+			if nextWatch == watchInterval {
+
+				prevTargets := numTargets
+
+				// check if anything has changed
+				events, err := w.ScanForEvents()
 				if err != nil {
-					prettyErr.WriteStringf("failed to run cmd: %s\n", err)
+					prettyErr.WriteStringf("failed to run scan: %s\n", err)
+				}
+				// log changes
+				for _, event := range events {
+					prettyOut.WriteStringf("%s\n", fileChangeString(event.Target.Path, event.Type))
+					// update num targets
+					if event.Type == watcher.Added {
+						numTargets++
+					}
+					if event.Type == watcher.Removed {
+						numTargets--
+					}
+				}
+
+				// log new target count
+				if prevTargets != numTargets {
+					prettyOut.WriteStringf("%s\n", fileCountString(numTargets))
+				}
+
+				// if so, execute command
+				if len(events) > 0 {
+					err := executeCmd(cmd)
+					if err != nil {
+						prettyErr.WriteStringf("failed to run cmd: %s\n", err)
+					}
 				}
 			}
-			// spin ticker
-			spin.Tick(numTargets)
+
+			if nextTick == tickInterval {
+				// spin ticker
+				spin.Tick(numTargets)
+			}
+
+			var sleep int
+			if nextTick < nextWatch {
+				// next iter is tick
+				sleep = nextTick
+				nextWatch -= nextTick
+				// reset tick
+				nextTick = tickInterval
+			} else if nextTick > nextWatch {
+				// next iter is watch
+				sleep = nextWatch
+				nextTick -= nextWatch
+				// reset watch
+				nextWatch = watchInterval
+			} else {
+				// next iter is iether
+				sleep = nextTick
+				// reset
+				nextTick = tickInterval
+				nextWatch = watchInterval
+			}
+
 			// sleep
-			time.Sleep(time.Millisecond * time.Duration(interval))
+			time.Sleep(time.Millisecond * time.Duration(sleep))
 		}
 	}
 	// run app
