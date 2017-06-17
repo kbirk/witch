@@ -38,11 +38,11 @@ func (w *PrettyWriter) Write(p []byte) (int, error) {
 // WriteStringf writes the provided formatted string to the underlying
 // interface.
 func (w *PrettyWriter) WriteStringf(format string, args ...interface{}) {
-	mu.Lock()
 	stamp := color.BlackString("[%s]", time.Now().Format(time.Stamp))
 	name := color.GreenString("[%s]", w.name)
 	wand := fmt.Sprintf("%s%s", color.GreenString("--"), color.MagentaString("⭑"))
 	msg := color.BlackString("%s", fmt.Sprintf(format, args...))
+	mu.Lock()
 	fmt.Fprintf(w.file, "%s\r%s %s %s %s", cursor.ClearLine(), stamp, name, wand, msg)
 	mu.Unlock()
 }

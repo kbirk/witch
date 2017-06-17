@@ -39,6 +39,7 @@ var (
 		"                    ¸,",
 		"                     ,",
 	}
+	colorHash = magicHash([]string{"`", "°", "º", "¤", "ø", ",", "¸"})
 )
 
 // Spinner represents a spinning console output.
@@ -57,17 +58,35 @@ func New(writer io.Writer) *Spinner {
 // Tick increments the cursor.
 func (s *Spinner) Tick(count uint64) {
 	s.c = (s.c + 1) % len(frames)
-	s.w.Write([]byte(cursor.ClearLine()))
-	s.w.Write([]byte(cursor.Hide()))
-	s.w.Write([]byte(castMagic(frames[s.c])))
-
+	magic := fmt.Sprintf("%s%s",
+		cursor.Hide(),
+		castMagic(frames[s.c]))
+	s.w.Write([]byte(magic))
 }
 
 // Done clears the cursor.
 func (s *Spinner) Done() {
-	s.w.Write([]byte(fmt.Sprintf("watch terminated %s%s",
+	goodbyte := fmt.Sprintf("watch terminated %s%s",
 		color.GreenString("✘"),
-		cursor.Show())))
+		cursor.Show())
+	s.w.Write([]byte(goodbyte))
+}
+
+func magicHash(strs []string) map[string][]string {
+	colors := make(map[string][]string)
+	for _, str := range strs {
+		colors[str] = magicColors(str)
+	}
+	return colors
+}
+
+func magicColors(str string) []string {
+	return []string{
+		color.MagentaString(str),
+		color.BlueString(str),
+		color.GreenString(str),
+		color.CyanString(str),
+	}
 }
 
 func castMagic(str string) string {
@@ -78,16 +97,7 @@ func castMagic(str string) string {
 			res += " "
 		} else {
 			i := int(rand.Float64() * 4)
-			switch i {
-			case 0:
-				res += color.MagentaString(s)
-			case 1:
-				res += color.BlueString(s)
-			case 2:
-				res += color.GreenString(s)
-			case 3:
-				res += color.CyanString(s)
-			}
+			res += colorHash[s][i]
 		}
 	}
 	return res
