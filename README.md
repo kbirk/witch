@@ -9,7 +9,15 @@
 
 ## Description
 
-Detect changes to files or directories and executes the provided command. Uses polling to work consistently across multiple platforms. Supports double-star globbing.
+Detects changes to files and directories then executes provided shell command. That's it.
+
+## Features:
+- Supports double-star globbing
+- Detects files / directories added after starting watch
+- Watch will persist if executed cmd fails (ex. compile / linting errors)
+- Awesome magic wand terminal spinner
+
+**Note**: Uses polling to work consistently across multiple platforms, therefore the CPU usage is dependent on the efficiently of your globs. With a minimal effort your watch should use less than 0.5% CPU. Will switch to event-based once [fsnofity](https://github.com/fsnotify/fsnotify) has matured sufficiently.
 
 ## Dependencies
 
@@ -38,6 +46,8 @@ Command-line args:
 	- Comma separated file and directory globs to ignore (default: "")
 --interval
 	- Watch scan interval, in milliseconds (default: 400)
+--no-spinner
+	- Disable fancy terminal spinner (default: false)
 ```
 
 ## Example

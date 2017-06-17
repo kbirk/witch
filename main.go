@@ -20,7 +20,7 @@ import (
 
 const (
 	name    = "witch"
-	version = "0.2.2"
+	version = "0.2.3"
 )
 
 var (
@@ -28,6 +28,7 @@ var (
 	ignore        []string
 	cmd           string
 	watchInterval int
+	noSpinner     bool
 	tickInterval  = 100
 	prev          *exec.Cmd
 	ready         = make(chan bool, 1)
@@ -169,9 +170,13 @@ func main() {
 			Usage: "Comma separated file and directory globs to ignore",
 		},
 		cli.IntFlag{
-			Name:  "watchInterval",
+			Name:  "interval",
 			Value: 400,
-			Usage: "Watch scan watchInterval, in milliseconds",
+			Usage: "Watch scan interval, in milliseconds",
+		},
+		cli.BoolFlag{
+			Name:  "no-spinner",
+			Usage: "Disable fancy terminal spinner",
 		},
 	}
 	app.Action = func(c *cli.Context) error {
@@ -196,7 +201,10 @@ func main() {
 		}
 
 		// watchInterval is optional
-		watchInterval = c.Int("watchInterval")
+		watchInterval = c.Int("interval")
+
+		// disable spinner
+		noSpinner = c.Bool("no-spinner")
 
 		// print logo
 		fmt.Fprintf(os.Stdout, createLogo())
@@ -244,7 +252,7 @@ func main() {
 		// start scan loop
 		for {
 			if nextWatch == watchInterval {
-
+				// prev number targets
 				prevTargets := numTargets
 
 				// check if anything has changed
@@ -278,30 +286,39 @@ func main() {
 				}
 			}
 
-			if nextTick == tickInterval {
-				// spin ticker
-				spin.Tick(numTargets)
-			}
-
 			var sleep int
-			if nextTick < nextWatch {
-				// next iter is tick
-				sleep = nextTick
-				nextWatch -= nextTick
-				// reset tick
-				nextTick = tickInterval
-			} else if nextTick > nextWatch {
-				// next iter is watch
-				sleep = nextWatch
-				nextTick -= nextWatch
-				// reset watch
-				nextWatch = watchInterval
+
+			if !noSpinner {
+				// spinner enabled
+
+				if nextTick == tickInterval {
+					// spin ticker
+					spin.Tick(numTargets)
+				}
+
+				if nextTick < nextWatch {
+					// next iter is tick
+					sleep = nextTick
+					nextWatch -= nextTick
+					// reset tick
+					nextTick = tickInterval
+				} else if nextTick > nextWatch {
+					// next iter is watch
+					sleep = nextWatch
+					nextTick -= nextWatch
+					// reset watch
+					nextWatch = watchInterval
+				} else {
+					// next iter is iether
+					sleep = nextTick
+					// reset
+					nextTick = tickInterval
+					nextWatch = watchInterval
+				}
+
 			} else {
-				// next iter is iether
-				sleep = nextTick
-				// reset
-				nextTick = tickInterval
-				nextWatch = watchInterval
+				// spinner disabled
+				sleep = watchInterval
 			}
 
 			// sleep
