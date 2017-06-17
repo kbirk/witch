@@ -31,24 +31,20 @@ func NewPretty(name string, file *os.File) *PrettyWriter {
 
 // Write implements the standard Write interface.
 func (w *PrettyWriter) Write(p []byte) (int, error) {
-	w.WriteString(string(p))
+	w.WriteStringf(string(p))
 	return len(p), nil
-}
-
-// WriteString writes the provided string to the underlying interface.
-func (w *PrettyWriter) WriteString(str string) {
-	mu.Lock()
-	stamp := color.BlackString("[%s]", time.Now().Format(time.Stamp))
-	name := color.GreenString("[%s]", w.name)
-	msg := color.BlackString("- %s", str)
-	fmt.Fprintf(w.file, "%s\r%s %s %s", cursor.ClearLine(), stamp, name, msg)
-	mu.Unlock()
 }
 
 // WriteStringf writes the provided formatted string to the underlying
 // interface.
 func (w *PrettyWriter) WriteStringf(format string, args ...interface{}) {
-	w.WriteString(fmt.Sprintf(format, args...))
+	mu.Lock()
+	stamp := color.BlackString("[%s]", time.Now().Format(time.Stamp))
+	name := color.GreenString("[%s]", w.name)
+	wand := fmt.Sprintf("%s%s", color.GreenString("--"), color.MagentaString("⭑"))
+	msg := color.BlackString("%s", fmt.Sprintf(format, args...))
+	fmt.Fprintf(w.file, "%s\r%s %s %s %s", cursor.ClearLine(), stamp, name, wand, msg)
+	mu.Unlock()
 }
 
 // CmdWriter represents a writer to log an output from the executed cmd.

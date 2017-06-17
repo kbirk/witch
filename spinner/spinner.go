@@ -11,7 +11,6 @@ import (
 )
 
 var (
-	wand = fmt.Sprintf("%s%s", color.GreenString("--"), color.MagentaString("⭑"))
 	// `°º¤ø,¸¸,ø¤º°`
 	frames = []string{
 		"",
@@ -59,22 +58,19 @@ func New(writer io.Writer) *Spinner {
 func (s *Spinner) Tick(count uint64) {
 	s.c = (s.c + 1) % len(frames)
 	s.w.Write([]byte(cursor.ClearLine()))
-	magic := fmt.Sprintf("%s%s %s %s",
-		cursor.HideCursor(),
-		fileCountString(count),
-		wand,
-		randomColors(frames[s.c]))
-	s.w.Write([]byte(magic))
+	s.w.Write([]byte(cursor.Hide()))
+	s.w.Write([]byte(castMagic(frames[s.c])))
+
 }
 
 // Done clears the cursor.
 func (s *Spinner) Done() {
 	s.w.Write([]byte(fmt.Sprintf("watch terminated %s%s",
 		color.GreenString("✘"),
-		cursor.ShowCursor())))
+		cursor.Show())))
 }
 
-func randomColors(str string) string {
+func castMagic(str string) string {
 	res := ""
 	for _, c := range str {
 		s := string(c)
@@ -95,20 +91,4 @@ func randomColors(str string) string {
 		}
 	}
 	return res
-}
-
-func fileCountString(count uint64) string {
-	switch count {
-	case 0:
-		return color.BlackString("no files found")
-	case 1:
-		return fmt.Sprintf("%s %s %s",
-			color.BlackString("watching"),
-			color.CyanString("%d", count),
-			color.BlackString("file"))
-	}
-	return fmt.Sprintf("%s %s %s",
-		color.BlackString("watching"),
-		color.CyanString("%d", count),
-		color.BlackString("files"))
 }

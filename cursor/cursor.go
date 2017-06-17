@@ -8,13 +8,13 @@ var (
 	esc = "\x1b"
 )
 
-// ShowCursor shows the terminal cursor.
-func ShowCursor() string {
+// Show returns ANSI escape sequence to show the cursor
+func Show() string {
 	return escape("[?25h")
 }
 
-// HideCursor hides the terminal cursor.
-func HideCursor() string {
+// Hide hides the terminal cursor.
+func Hide() string {
 	return escape("[?25l")
 }
 
