@@ -13,22 +13,29 @@ import (
 	"github.com/urfave/cli"
 
 	"github.com/unchartedsoftware/witch/graceful"
+	"github.com/unchartedsoftware/witch/spinner"
 	"github.com/unchartedsoftware/witch/watcher"
+	"github.com/unchartedsoftware/witch/writer"
 )
 
 const (
 	name    = "witch"
-	version = "0.2.1"
+	version = "0.2.2"
 )
 
 var (
-	watch    []string
-	ignore   []string
-	cmd      string
-	interval int
-	prev     *exec.Cmd
-	ready    = make(chan bool, 1)
-	mu       = &sync.Mutex{}
+	watch     []string
+	ignore    []string
+	cmd       string
+	interval  int
+	prev      *exec.Cmd
+	ready     = make(chan bool, 1)
+	mu        = &sync.Mutex{}
+	prettyOut = writer.NewPretty(name, os.Stdout)
+	prettyErr = writer.NewPretty(name, os.Stderr)
+	cmdOut    = writer.NewCmd(os.Stdout)
+	cmdErr    = writer.NewCmd(os.Stderr)
+	spin      = spinner.New(prettyOut)
 )
 
 func createLogo() string {
@@ -37,20 +44,6 @@ func createLogo() string {
 		color.GreenString(" _|_  _ |_\n         ") +
 		color.GreenString("\\/\\/  |  |_ |_ | |\n\n        ") +
 		color.BlackString("version %s\n\n", version)
-}
-
-func writeToErr(format string, args ...interface{}) {
-	stamp := color.BlackString("[%s]", time.Now().Format(time.Stamp))
-	name := color.GreenString("[%s]", name)
-	msg := color.BlackString("- %s", fmt.Sprintf(format, args...))
-	fmt.Fprintf(os.Stderr, "%s %s %s\n", stamp, name, msg)
-}
-
-func writeToOut(format string, args ...interface{}) {
-	stamp := color.BlackString("[%s]", time.Now().Format(time.Stamp))
-	name := color.GreenString("[witch]")
-	msg := color.BlackString("- %s", fmt.Sprintf(format, args...))
-	fmt.Fprintf(os.Stdout, "%s %s %s\n", stamp, name, msg)
 }
 
 func fileChangeString(path string, event string) string {
@@ -102,7 +95,7 @@ func killCmd() {
 	if prev != nil {
 		err := syscall.Kill(-prev.Process.Pid, syscall.SIGKILL)
 		if err != nil {
-			writeToErr("failed to kill prev running cmd: %s", err)
+			prettyErr.WriteStringf("failed to kill prev running cmd: %s\n", err)
 		}
 	}
 	mu.Unlock()
@@ -119,11 +112,11 @@ func executeCmd(cmd string) error {
 	c := exec.Command("/bin/sh", "-c", cmd)
 	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	c.Stdin = os.Stdin
-	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
+	c.Stdout = cmdOut
+	c.Stderr = cmdErr
 
 	// log cmd
-	writeToOut("executing %s", color.MagentaString(cmd))
+	prettyOut.WriteStringf("executing %s\n", color.MagentaString(cmd))
 
 	// run command in another process
 	err := c.Start()
@@ -135,7 +128,7 @@ func executeCmd(cmd string) error {
 	go func() {
 		_, err := c.Process.Wait()
 		if err != nil {
-			writeToErr("cmd encountered error: %s", err)
+			prettyErr.WriteStringf("cmd encountered error: %s\n", err)
 		}
 		// clear prev
 		mu.Lock()
@@ -212,13 +205,13 @@ func main() {
 
 		// add watches
 		for _, arg := range watch {
-			writeToOut("watching %s", color.BlueString(arg))
+			prettyOut.WriteStringf("watching %s\n", color.BlueString(arg))
 			w.Watch(arg)
 		}
 
 		// add ignores first
 		for _, arg := range ignore {
-			writeToOut("ignoring %s", color.RedString(arg))
+			prettyOut.WriteStringf("ignoring %s\n", color.RedString(arg))
 			w.Ignore(arg)
 		}
 
@@ -227,12 +220,12 @@ func main() {
 		if err != nil {
 			return cli.NewExitError(fmt.Sprintf("Failed to run initial scan: %s", err), 3)
 		}
-		writeToOut(fileCountString(numTargets))
 
 		// gracefully shutdown cmd process on exit
 		graceful.OnSignal(func() {
 			// kill process
 			killCmd()
+			spin.Done()
 			os.Exit(0)
 		})
 
@@ -247,12 +240,11 @@ func main() {
 			// check if anything has changed
 			events, err := w.ScanForEvents()
 			if err != nil {
-				writeToErr("failed to run scan: %s", err)
+				prettyErr.WriteStringf("failed to run scan: %s\n", err)
 			}
 			// log changes
-			prevTargets := numTargets
 			for _, event := range events {
-				writeToOut(fileChangeString(event.Target.Path, event.Type))
+				prettyOut.WriteStringf("%s\n", fileChangeString(event.Target.Path, event.Type))
 				// update num targets
 				if event.Type == watcher.Added {
 					numTargets++
@@ -261,17 +253,15 @@ func main() {
 					numTargets--
 				}
 			}
-			// log new target count
-			if prevTargets != numTargets {
-				writeToOut(fileCountString(numTargets))
-			}
 			// if so, execute command
 			if len(events) > 0 {
 				err := executeCmd(cmd)
 				if err != nil {
-					writeToErr("failed to run cmd: %s", err)
+					prettyErr.WriteStringf("failed to run cmd: %s\n", err)
 				}
 			}
+			// spin ticker
+			spin.Tick(numTargets)
 			// sleep
 			time.Sleep(time.Millisecond * time.Duration(interval))
 		}
