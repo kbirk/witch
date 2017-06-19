@@ -1,6 +1,6 @@
-package watcher
+package glob
 
-// Code slightly modified from: https://github.com/bmatcuk/doublestar
+// Code modified from: https://github.com/bmatcuk/doublestar
 
 // The MIT License (MIT)
 //
@@ -36,40 +36,38 @@ import (
 // ErrBadPattern represents a bad glob pattern.
 var ErrBadPattern = path.ErrBadPattern
 
-// Glob returns the names of all files matching pattern or nil
-// if there is no matching file. The syntax of pattern is the same
-// as in Match. The pattern may describe hierarchical names such as
-// /usr/*/bin/ed (assuming the Separator is '/').
-//
-// Glob ignores file system errors such as I/O errors reading directories.
-// The only possible returned error is ErrBadPattern, when pattern
-// is malformed.
-//
-// Your system path separator is automatically used. This means on
-// systems where the separator is '\\' (Windows), escaping will be
-// disabled.
-//
-// Note: this is meant as a drop-in replacement for filepath.Glob().
-func Glob(pattern string, ignores map[string]bool) (matches []string, err error) {
+// Glob returns a map[string]os.FileInfo based on the provided glob. It will
+// ignore any paths included in the ignores argument. When matching with a
+// directory, if traverseDirs is true, it will traverse the directory, if it is
+// false it will return the directory without traversing.
+func Glob(matches map[string]os.FileInfo, pattern string, ignores []string, traverseDirs bool) (map[string]os.FileInfo, error) {
 	patternComponents := splitPathOnSeparator(pattern, os.PathSeparator)
 	if len(patternComponents) == 0 {
 		return nil, nil
+	}
+	// instantiate map if it is nil
+	if matches == nil {
+		matches = make(map[string]os.FileInfo)
 	}
 	// On Windows systems, this will return the drive name ('C:'), on others,
 	// it will return an empty string.
 	volumeName := filepath.VolumeName(pattern)
 	// If the first pattern component is equal to the volume name, then the
 	// pattern is an absolute path.
+	var err error
 	if patternComponents[0] == volumeName {
-		return doGlob(fmt.Sprintf("%s%s", volumeName, string(os.PathSeparator)), patternComponents[1:], matches, ignores)
+		baseDir := fmt.Sprintf("%s%s", volumeName, string(os.PathSeparator))
+		err = doGlob(matches, baseDir, patternComponents[1:], ignores, traverseDirs)
+	} else {
+		err = doGlob(matches, ".", patternComponents, ignores, traverseDirs)
 	}
-	return doGlob(".", patternComponents, matches, ignores)
+	if err != nil {
+		return nil, err
+	}
+	return matches, nil
 }
 
-func doGlob(basedir string, components, matches []string, ignores map[string]bool) (m []string, e error) {
-	m = matches
-	e = nil
-
+func doGlob(matches map[string]os.FileInfo, basedir string, components []string, ignores []string, traverseDirs bool) error {
 	// figure out how many components we don't need to glob because they're
 	// just straight directory names
 	patLen := len(components)
@@ -83,21 +81,30 @@ func doGlob(basedir string, components, matches []string, ignores map[string]boo
 		basedir = filepath.Join(basedir, filepath.Join(components[0:patIdx]...))
 	}
 
-	if ignores != nil && isIgnored(basedir, ignores) {
-		// exist early if path is ignored
-		return
+	// exit early if path is ignored
+	if isIgnored(basedir, ignores) {
+		return nil
 	}
 
 	// Stat will return an error if the file/directory doesn't exist
 	fi, err := os.Lstat(basedir)
 	if err != nil {
-		return
+		return nil
 	}
 
 	// if there are no more components, we've found a match
 	if patIdx >= patLen {
-		m = append(m, basedir)
-		return
+		if traverseDirs && fi.IsDir() {
+			// if traverse is enabled, and it is a dir, traverse it
+			err := traverseLeaf(matches, basedir, fi, ignores)
+			if err != nil {
+				return err
+			}
+		} else {
+			// otherwise add it
+			matches[basedir] = fi
+		}
+		return nil
 	}
 
 	// otherwise, we need to check each item in the directory...
@@ -105,23 +112,20 @@ func doGlob(basedir string, components, matches []string, ignores map[string]boo
 	if fi.Mode()&os.ModeSymlink != 0 {
 		fi, err = os.Stat(basedir)
 		if err != nil {
-			return
+			return nil
 		}
 	}
 
 	// confirm it's a directory...
 	if !fi.IsDir() {
-		return
+		return nil
 	}
 
 	// read directory
-	dir, err := os.Open(basedir)
+	files, err := readDir(basedir)
 	if err != nil {
-		return
+		return nil
 	}
-	defer dir.Close()
-
-	files, _ := dir.Readdir(-1)
 	lastComponent := patIdx+1 >= patLen
 	if components[patIdx] == "**" {
 		// if the current component is a doublestar, we'll try depth-first
@@ -134,39 +138,115 @@ func doGlob(basedir string, components, matches []string, ignores map[string]boo
 				}
 			}
 
+			path := filepath.Join(basedir, file.Name())
 			if file.IsDir() {
-
-				if lastComponent {
-					m = append(m, filepath.Join(basedir, file.Name()))
+				err := doGlob(matches, path, components[patIdx:], ignores, traverseDirs)
+				if err != nil {
+					return err
 				}
-				m, e = doGlob(filepath.Join(basedir, file.Name()), components[patIdx:], m, ignores)
 			} else if lastComponent {
 				// if the pattern's last component is a doublestar, we match filenames, too
-				m = append(m, filepath.Join(basedir, file.Name()))
+				matches[path] = file
 			}
 		}
 		if lastComponent {
-			return
+			return nil
 		}
 		patIdx++
 		lastComponent = patIdx+1 >= patLen
 	}
 
-	var match bool
 	for _, file := range files {
-		match, e = matchComponent(components[patIdx], file.Name())
-		if e != nil {
-			return
+		match, err := matchComponent(components[patIdx], file.Name())
+		if err != nil {
+			return err
 		}
 		if match {
+			path := filepath.Join(basedir, file.Name())
 			if lastComponent {
-				m = append(m, filepath.Join(basedir, file.Name()))
+				if file.IsDir() && traverseDirs {
+					// if traverse is enabled, and it is a dir, traverse it
+					err := traverseLeaf(matches, path, file, ignores)
+					if err != nil {
+						return err
+					}
+				} else {
+					// otherwise add it
+					matches[path] = file
+				}
 			} else {
-				m, e = doGlob(filepath.Join(basedir, file.Name()), components[patIdx+1:], m, ignores)
+				err := doGlob(matches, path, components[patIdx+1:], ignores, traverseDirs)
+				if err != nil {
+					return err
+				}
 			}
 		}
 	}
-	return
+	return nil
+}
+
+func traverseLeaf(matches map[string]os.FileInfo, path string, file os.FileInfo, ignores []string) error {
+	// check if ignored
+	if isIgnored(path, ignores) {
+		return nil
+	}
+	// if it's not a directory, add to matches and exit
+	if !file.IsDir() {
+		// add to map
+		matches[path] = file
+		return nil
+	}
+	// read directory contents
+	files, err := readDir(path)
+	if err != nil {
+		return err
+	}
+	// for each child
+	for _, fi := range files {
+		// create subpath
+		subpath := filepath.Join(path, fi.Name())
+		err := traverseLeaf(matches, subpath, fi, ignores)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func isSameOrSubDir(child, parent string) bool {
+	rel, err := filepath.Rel(child, parent)
+	if err != nil {
+		return false
+	}
+	return strings.HasSuffix(rel, ".") || strings.HasSuffix(rel, "..")
+}
+
+func isIgnored(path string, ignores []string) bool {
+	if ignores == nil || len(ignores) == 0 {
+		return false
+	}
+	for _, ignore := range ignores {
+		fmt.Println("testing", path, "vs", ignore)
+		if isSameOrSubDir(path, ignore) {
+			return true
+		}
+	}
+	return false
+}
+
+func readDir(path string) ([]os.FileInfo, error) {
+	// similar to ioutil.ReadDir execept it doesn't sort by lexicographical
+	// order
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	list, err := f.Readdir(-1)
+	f.Close()
+	if err != nil {
+		return nil, err
+	}
+	return list, nil
 }
 
 func splitPathOnSeparator(path string, separator rune) []string {

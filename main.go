@@ -20,7 +20,7 @@ import (
 
 const (
 	name    = "witch"
-	version = "0.2.3"
+	version = "0.2.4"
 )
 
 var (
@@ -262,7 +262,7 @@ func main() {
 				}
 				// log changes
 				for _, event := range events {
-					prettyOut.WriteStringf("%s\n", fileChangeString(event.Target.Path, event.Type))
+					prettyOut.WriteStringf("%s\n", fileChangeString(event.Path, event.Type))
 					// update num targets
 					if event.Type == watcher.Added {
 						numTargets++

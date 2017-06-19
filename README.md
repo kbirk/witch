@@ -9,15 +9,18 @@
 
 ## Description
 
-Detects changes to files and directories then executes provided shell command. That's it.
+Detects changes to files or directories and executes the provided shell command. That's it.
 
 ## Features:
-- Supports double-star globbing
+- Supports [double-star globbing](https://github.com/bmatcuk/doublestar)
 - Detects files / directories added after starting watch
-- Watch will persist if executed cmd fails (ex. compile / linting errors)
+- Watch will persist if executed shell command returns an error (ex. compile / linting errors)
 - Awesome magic wand terminal spinner
 
-**Note**: Uses polling to work consistently across multiple platforms, therefore the CPU usage is dependent on the efficiently of your globs. With a minimal effort your watch should use less than 0.5% CPU. Will switch to event-based once [fsnofity](https://github.com/fsnotify/fsnotify) has matured sufficiently.
+**Note**: Uses polling to work consistently across multiple platforms, therefore the CPU usage is dependent on the efficiently of your globs. With a minimal effort your watch should use very little CPU. Will switch to event-based once [fsnofity](https://github.com/fsnotify/fsnotify) has matured sufficiently.
+
+## Dependencies
+
 
 ## Dependencies
 
@@ -37,18 +40,39 @@ witch --cmd=<shell-command> [--watch="<glob>,..."] [--ignore="<glob>,..."] [--in
 
 Command-line args:
 
-```
---cmd
-	- Shell command to run after detected changes
---watch
-	- Comma separated file and directory globs to watch (default: ".")
---ignore
-	- Comma separated file and directory globs to ignore (default: "")
---interval
-	- Watch scan interval, in milliseconds (default: 400)
---no-spinner
-	- Disable fancy terminal spinner (default: false)
-```
+Flag         | Description
+------------ | -------
+`cmd`        | Shell command to execute after changes are detected
+`watch`      | Comma separated globs to watch (default: ".")
+`ignore`     | Comma separated globs to ignore (default: "")
+`interval`   | Scan interval in milliseconds (default: 400)
+`no-spinner` | Disable fancy terminal spinner (default: false)
+
+## Globbing
+
+Globbing rules are the same as [doublestar](https://github.com/bmatcuk/doublestar) which supports the following special terms in the patterns:
+
+Special Terms | Meaning
+------------- | -------
+`*`           | matches any sequence of non-path-separators
+`**`          | matches any sequence of characters, including path separators
+`?`           | matches any single non-path-separator character
+`[class]`     | matches any single non-path-separator character against a class of characters ([see below](#character-classes))
+`{alt1,...}`  | matches a sequence of characters if one of the comma-separated alternatives matches
+
+Any character with a special meaning can be escaped with a backslash (`\`).
+
+### Character Classes
+
+Character classes support the following:
+
+Class      | Meaning
+---------- | -------
+`[abc]`    | matches any single character within the set
+`[a-z]`    | matches any single character in the range
+`[^class]` | matches any single character which does *not* match the class
+
+Any globs resolved to a directory will be have all contents watched.
 
 ## Example
 

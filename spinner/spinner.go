@@ -59,7 +59,7 @@ func New(writer io.Writer) *Spinner {
 func (s *Spinner) Tick(count uint64) {
 	s.c = (s.c + 1) % len(frames)
 	magic := fmt.Sprintf("%s%s",
-		cursor.Hide(),
+		cursor.Hide,
 		castMagic(frames[s.c]))
 	s.w.Write([]byte(magic))
 }
@@ -68,7 +68,7 @@ func (s *Spinner) Tick(count uint64) {
 func (s *Spinner) Done() {
 	goodbyte := fmt.Sprintf("watch terminated %s%s",
 		color.GreenString("✘"),
-		cursor.Show())
+		cursor.Show)
 	s.w.Write([]byte(goodbyte))
 }
 

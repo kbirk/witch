@@ -43,7 +43,7 @@ func (w *PrettyWriter) WriteStringf(format string, args ...interface{}) {
 	wand := fmt.Sprintf("%s%s", color.GreenString("--"), color.MagentaString("⭑"))
 	msg := color.BlackString("%s", fmt.Sprintf(format, args...))
 	mu.Lock()
-	fmt.Fprintf(w.file, "%s\r%s %s %s %s", cursor.ClearLine(), stamp, name, wand, msg)
+	fmt.Fprintf(w.file, "%s\r%s %s %s %s", cursor.ClearLine, stamp, name, wand, msg)
 	mu.Unlock()
 }
 
@@ -62,7 +62,7 @@ func NewCmd(file *os.File) *CmdWriter {
 // Write implements the standard Write interface.
 func (w *CmdWriter) Write(p []byte) (int, error) {
 	mu.Lock()
-	fmt.Fprintf(w.file, "%s\r%s", cursor.ClearLine(), string(p))
+	fmt.Fprintf(w.file, "%s\r%s", cursor.ClearLine, string(p))
 	mu.Unlock()
 	return len(p), nil
 }
