@@ -226,7 +226,6 @@ func isIgnored(path string, ignores []string) bool {
 		return false
 	}
 	for _, ignore := range ignores {
-		fmt.Println("testing", path, "vs", ignore)
 		if isSameOrSubDir(path, ignore) {
 			return true
 		}
