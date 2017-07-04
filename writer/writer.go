@@ -3,6 +3,7 @@ package writer
 import (
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -49,7 +50,8 @@ func (w *PrettyWriter) WriteStringf(format string, args ...interface{}) {
 
 // CmdWriter represents a writer to log an output from the executed cmd.
 type CmdWriter struct {
-	file *os.File
+	file   *os.File
+	buffer string
 }
 
 // NewCmd instantiates and returns a new cmd writer.
@@ -62,7 +64,31 @@ func NewCmd(file *os.File) *CmdWriter {
 // Write implements the standard Write interface.
 func (w *CmdWriter) Write(p []byte) (int, error) {
 	mu.Lock()
-	fmt.Fprintf(w.file, "%s\r%s", cursor.ClearLine, string(p))
+	// append to buffer
+	w.buffer += string(p)
+	for {
+		index := strings.IndexAny(w.buffer, "\n")
+		if index == -1 {
+			// no endline
+			break
+		}
+		fmt.Fprintf(w.file, "%s\r%s", cursor.ClearLine, w.buffer[0:index+1])
+		w.buffer = w.buffer[index+1:]
+	}
 	mu.Unlock()
 	return len(p), nil
+}
+
+// Flush writes any buffered data to the underlying io.Writer.
+func (w *CmdWriter) Flush() error {
+	_, err := w.Write([]byte(w.buffer))
+	if err != nil {
+		return err
+	}
+	mu.Lock()
+	if len(w.buffer) > 0 {
+		fmt.Fprintf(w.file, "%s\r%s\n", cursor.ClearLine, w.buffer)
+	}
+	mu.Unlock()
+	return nil
 }

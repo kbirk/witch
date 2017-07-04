@@ -20,7 +20,7 @@ import (
 
 const (
 	name    = "witch"
-	version = "0.2.4"
+	version = "0.2.5"
 )
 
 var (
@@ -95,6 +95,10 @@ func splitAndTrim(arg string) []string {
 func killCmd() {
 	mu.Lock()
 	if prev != nil {
+		// flush any pending output
+		cmdOut.Flush()
+		cmdErr.Flush()
+		// send kill signal
 		err := syscall.Kill(-prev.Process.Pid, syscall.SIGKILL)
 		if err != nil {
 			prettyErr.WriteStringf("failed to kill prev running cmd: %s\n", err)

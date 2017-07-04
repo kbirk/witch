@@ -66,10 +66,10 @@ func (s *Spinner) Tick(count uint64) {
 
 // Done clears the cursor.
 func (s *Spinner) Done() {
-	goodbyte := fmt.Sprintf("watch terminated %s%s",
+	goodbye := fmt.Sprintf("watch terminated %s%s\n",
 		color.GreenString("✘"),
 		cursor.Show)
-	s.w.Write([]byte(goodbyte))
+	s.w.Write([]byte(goodbye))
 }
 
 func magicHash(strs []string) map[string][]string {
