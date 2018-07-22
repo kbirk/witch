@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/fatih/color"
+	"github.com/kr/pty"
 	"github.com/urfave/cli"
 
 	"github.com/unchartedsoftware/witch/graceful"
@@ -20,7 +21,7 @@ import (
 
 const (
 	name    = "witch"
-	version = "0.2.5"
+	version = "0.2.6"
 )
 
 var (
@@ -33,11 +34,9 @@ var (
 	prev          *exec.Cmd
 	ready         = make(chan bool, 1)
 	mu            = &sync.Mutex{}
-	prettyOut     = writer.NewPretty(name, os.Stdout)
-	prettyErr     = writer.NewPretty(name, os.Stderr)
-	cmdOut        = writer.NewCmd(os.Stdout)
-	cmdErr        = writer.NewCmd(os.Stderr)
-	spin          = spinner.New(prettyOut)
+	prettyWriter  = writer.NewPretty(name, os.Stdout)
+	cmdWriter     = writer.NewCmd(os.Stdout)
+	spin          = spinner.New(prettyWriter)
 )
 
 func createLogo() string {
@@ -45,39 +44,39 @@ func createLogo() string {
 		color.MagentaString("★") +
 		color.GreenString(" _|_  _ |_\n         ") +
 		color.GreenString("\\/\\/  |  |_ |_ | |\n\n        ") +
-		color.BlackString("version %s\n\n", version)
+		color.HiBlackString("version %s\n\n", version)
 }
 
 func fileChangeString(path string, event string) string {
 	switch event {
 	case watcher.Added:
 		return fmt.Sprintf("%s %s",
-			color.BlackString(path),
+			color.HiBlackString(path),
 			color.GreenString(event))
 	case watcher.Removed:
 		return fmt.Sprintf("%s %s",
-			color.BlackString(path),
+			color.HiBlackString(path),
 			color.RedString(event))
 	}
 	return fmt.Sprintf("%s %s",
-		color.BlackString(path),
+		color.HiBlackString(path),
 		color.BlueString(event))
 }
 
 func fileCountString(count uint64) string {
 	switch count {
 	case 0:
-		return color.BlackString("no files found")
+		return color.HiBlackString("no files found")
 	case 1:
 		return fmt.Sprintf("%s %s %s",
-			color.BlackString("watching"),
+			color.HiBlackString("watching"),
 			color.BlueString("%d", count),
-			color.BlackString("file"))
+			color.HiBlackString("file"))
 	}
 	return fmt.Sprintf("%s %s %s",
-		color.BlackString("watching"),
+		color.HiBlackString("watching"),
 		color.BlueString("%d", count),
-		color.BlackString("files"))
+		color.HiBlackString("files"))
 }
 
 func splitAndTrim(arg string) []string {
@@ -96,12 +95,11 @@ func killCmd() {
 	mu.Lock()
 	if prev != nil {
 		// flush any pending output
-		cmdOut.Flush()
-		cmdErr.Flush()
+		cmdWriter.Flush()
 		// send kill signal
 		err := syscall.Kill(-prev.Process.Pid, syscall.SIGKILL)
 		if err != nil {
-			prettyErr.WriteStringf("failed to kill prev running cmd: %s\n", err)
+			prettyWriter.WriteStringf("failed to kill prev running cmd: %s\n", err)
 		}
 	}
 	mu.Unlock()
@@ -116,25 +114,28 @@ func executeCmd(cmd string) error {
 
 	// create command
 	c := exec.Command("/bin/sh", "-c", cmd)
-	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	c.Stdin = os.Stdin
-	c.Stdout = cmdOut
-	c.Stderr = cmdErr
+	//c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// c.Stdin = os.Stdin
+	// c.Stdout = os.Stdout
+	// c.Stderr = os.Stderr
 
 	// log cmd
-	prettyOut.WriteStringf("executing %s\n", color.MagentaString(cmd))
+	prettyWriter.WriteStringf("executing %s\n", color.MagentaString(cmd))
 
 	// run command in another process
-	err := c.Start()
+	f, err := pty.Start(c)
 	if err != nil {
 		return err
 	}
+
+	// proxy the output to the cmd writer
+	cmdWriter.Proxy(f)
 
 	// wait on process
 	go func() {
 		_, err := c.Process.Wait()
 		if err != nil {
-			prettyErr.WriteStringf("cmd encountered error: %s\n", err)
+			prettyWriter.WriteStringf("cmd encountered error: %s\n", err)
 		}
 		// clear prev
 		mu.Lock()
@@ -218,13 +219,13 @@ func main() {
 
 		// add watches
 		for _, arg := range watch {
-			prettyOut.WriteStringf("watching %s\n", color.BlueString(arg))
+			prettyWriter.WriteStringf("watching %s\n", color.BlueString(arg))
 			w.Watch(arg)
 		}
 
 		// add ignores first
 		for _, arg := range ignore {
-			prettyOut.WriteStringf("ignoring %s\n", color.RedString(arg))
+			prettyWriter.WriteStringf("ignoring %s\n", color.RedString(arg))
 			w.Ignore(arg)
 		}
 
@@ -233,7 +234,7 @@ func main() {
 		if err != nil {
 			return cli.NewExitError(fmt.Sprintf("Failed to run initial scan: %s", err), 3)
 		}
-		prettyOut.WriteStringf("%s\n", fileCountString(numTargets))
+		prettyWriter.WriteStringf("%s\n", fileCountString(numTargets))
 
 		// gracefully shutdown cmd process on exit
 		graceful.OnSignal(func() {
@@ -247,7 +248,10 @@ func main() {
 		ready <- true
 
 		// launch cmd process
-		executeCmd(cmd)
+		err = executeCmd(cmd)
+		if err != nil {
+			prettyWriter.WriteStringf("failed to run cmd: %s\n", err)
+		}
 
 		// track which action to take
 		nextWatch := watchInterval
@@ -262,11 +266,11 @@ func main() {
 				// check if anything has changed
 				events, err := w.ScanForEvents()
 				if err != nil {
-					prettyErr.WriteStringf("failed to run scan: %s\n", err)
+					prettyWriter.WriteStringf("failed to run scan: %s\n", err)
 				}
 				// log changes
 				for _, event := range events {
-					prettyOut.WriteStringf("%s\n", fileChangeString(event.Path, event.Type))
+					prettyWriter.WriteStringf("%s\n", fileChangeString(event.Path, event.Type))
 					// update num targets
 					if event.Type == watcher.Added {
 						numTargets++
@@ -278,14 +282,14 @@ func main() {
 
 				// log new target count
 				if prevTargets != numTargets {
-					prettyOut.WriteStringf("%s\n", fileCountString(numTargets))
+					prettyWriter.WriteStringf("%s\n", fileCountString(numTargets))
 				}
 
 				// if so, execute command
 				if len(events) > 0 {
 					err := executeCmd(cmd)
 					if err != nil {
-						prettyErr.WriteStringf("failed to run cmd: %s\n", err)
+						prettyWriter.WriteStringf("failed to run cmd: %s\n", err)
 					}
 				}
 			}

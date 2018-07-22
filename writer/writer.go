@@ -1,6 +1,7 @@
 package writer
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"strings"
@@ -39,10 +40,10 @@ func (w *PrettyWriter) Write(p []byte) (int, error) {
 // WriteStringf writes the provided formatted string to the underlying
 // interface.
 func (w *PrettyWriter) WriteStringf(format string, args ...interface{}) {
-	stamp := color.BlackString("[%s]", time.Now().Format(time.Stamp))
+	stamp := color.HiBlackString("[%s]", time.Now().Format(time.Stamp))
 	name := color.GreenString("[%s]", w.name)
 	wand := fmt.Sprintf("%s%s", color.GreenString("--"), color.MagentaString("⭑"))
-	msg := color.BlackString("%s", fmt.Sprintf(format, args...))
+	msg := color.HiBlackString("%s", fmt.Sprintf(format, args...))
 	mu.Lock()
 	fmt.Fprintf(w.file, "%s\r%s %s %s %s", cursor.ClearLine, stamp, name, wand, msg)
 	mu.Unlock()
@@ -50,15 +51,40 @@ func (w *PrettyWriter) WriteStringf(format string, args ...interface{}) {
 
 // CmdWriter represents a writer to log an output from the executed cmd.
 type CmdWriter struct {
-	file   *os.File
-	buffer string
+	file    *os.File
+	proxy   *os.File
+	scanner *bufio.Scanner
+	buffer  string
+	kill    chan bool
 }
 
 // NewCmd instantiates and returns a new cmd writer.
 func NewCmd(file *os.File) *CmdWriter {
 	return &CmdWriter{
 		file: file,
+		kill: make(chan bool),
 	}
+}
+
+// Proxy will forward the output from the provided os.File through the writer.
+func (w *CmdWriter) Proxy(f *os.File) {
+	mu.Lock()
+	// if we have an existing proxy, send EOF to kill it.
+	if w.proxy != nil {
+		// wait until its dead
+		<-w.kill
+	}
+	// create new proxy
+	w.proxy = f
+	w.scanner = bufio.NewScanner(w.proxy)
+	mu.Unlock()
+	go func() {
+		for w.scanner.Scan() {
+			line := w.scanner.Text()
+			w.Write([]byte(line + "\n"))
+		}
+		w.kill <- true
+	}()
 }
 
 // Write implements the standard Write interface.
