@@ -41,7 +41,7 @@ var ErrBadPattern = path.ErrBadPattern
 // directory, if traverseDirs is true, it will traverse the directory, if it is
 // false it will return the directory without traversing.
 func Glob(matches map[string]os.FileInfo, pattern string, ignores []string, traverseDirs bool) (map[string]os.FileInfo, error) {
-	patternComponents := splitPathOnSeparator(pattern, os.PathSeparator)
+	patternComponents := splitPathOnSeparator(filepath.ToSlash(pattern), '/')
 	if len(patternComponents) == 0 {
 		return nil, nil
 	}
@@ -101,7 +101,8 @@ func doGlob(matches map[string]os.FileInfo, basedir string, components []string,
 				return err
 			}
 		} else {
-			// otherwise add it
+			// otherwise add it, no need to check for ignores here as it is
+			// done above
 			matches[basedir] = fi
 		}
 		return nil
@@ -145,8 +146,12 @@ func doGlob(matches map[string]os.FileInfo, basedir string, components []string,
 					return err
 				}
 			} else if lastComponent {
-				// if the pattern's last component is a doublestar, we match filenames, too
-				matches[path] = file
+				// if the pattern's last component is a doublestar, we match
+				// filenames, too
+				if !isIgnored(path, ignores) {
+					// add it
+					matches[path] = file
+				}
 			}
 		}
 		if lastComponent {
@@ -171,8 +176,10 @@ func doGlob(matches map[string]os.FileInfo, basedir string, components []string,
 						return err
 					}
 				} else {
-					// otherwise add it
-					matches[path] = file
+					if !isIgnored(path, ignores) {
+						// otherwise add it
+						matches[path] = file
+					}
 				}
 			} else {
 				err := doGlob(matches, path, components[patIdx+1:], ignores, traverseDirs)
