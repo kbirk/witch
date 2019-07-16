@@ -9,8 +9,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/creack/pty"
 	"github.com/fatih/color"
-	"github.com/kr/pty"
 	"github.com/urfave/cli"
 
 	"github.com/unchartedsoftware/witch/graceful"
@@ -21,7 +21,7 @@ import (
 
 const (
 	name    = "witch"
-	version = "0.2.7"
+	version = "0.2.8"
 )
 
 var (
@@ -30,6 +30,7 @@ var (
 	cmd           string
 	watchInterval int
 	noSpinner     bool
+	maxTokenSize  int
 	tickInterval  = 100
 	prev          *exec.Cmd
 	ready         = make(chan bool, 1)
@@ -179,6 +180,11 @@ func main() {
 			Value: 400,
 			Usage: "Watch scan interval, in milliseconds",
 		},
+		cli.IntFlag{
+			Name:  "max-token-size",
+			Value: 1024 * 1000 * 2,
+			Usage: "Max output token size, in bytes",
+		},
 		cli.BoolFlag{
 			Name:  "no-spinner",
 			Usage: "Disable fancy terminal spinner",
@@ -210,6 +216,12 @@ func main() {
 
 		// disable spinner
 		noSpinner = c.Bool("no-spinner")
+
+		// max token size
+		maxTokenSize = c.Int("max-token-size")
+
+		// set token size
+		cmdWriter.MaxTokenSize(maxTokenSize)
 
 		// print logo
 		fmt.Fprintf(os.Stdout, createLogo())

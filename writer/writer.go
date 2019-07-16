@@ -51,11 +51,12 @@ func (w *PrettyWriter) WriteStringf(format string, args ...interface{}) {
 
 // CmdWriter represents a writer to log an output from the executed cmd.
 type CmdWriter struct {
-	file    *os.File
-	proxy   *os.File
-	scanner *bufio.Scanner
-	buffer  string
-	kill    chan bool
+	file         *os.File
+	proxy        *os.File
+	scanner      *bufio.Scanner
+	maxTokenSize int
+	buffer       string
+	kill         chan bool
 }
 
 // NewCmd instantiates and returns a new cmd writer.
@@ -64,6 +65,11 @@ func NewCmd(file *os.File) *CmdWriter {
 		file: file,
 		kill: make(chan bool),
 	}
+}
+
+// MaxTokenSize sets the max token size for the underlying scanner.
+func (w *CmdWriter) MaxTokenSize(numBytes int) {
+	w.maxTokenSize = numBytes
 }
 
 // Proxy will forward the output from the provided os.File through the writer.
@@ -77,11 +83,18 @@ func (w *CmdWriter) Proxy(f *os.File) {
 	// create new proxy
 	w.proxy = f
 	w.scanner = bufio.NewScanner(w.proxy)
+
+	buf := make([]byte, w.maxTokenSize)
+	w.scanner.Buffer(buf, w.maxTokenSize)
+
 	mu.Unlock()
 	go func() {
 		for w.scanner.Scan() {
 			line := w.scanner.Text()
 			w.Write([]byte(line + "\n"))
+		}
+		if w.scanner.Err() != nil {
+			fmt.Fprintf(w.file, "%s\r%s\n", cursor.ClearLine, w.scanner.Err())
 		}
 		w.kill <- true
 	}()

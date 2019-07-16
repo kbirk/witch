@@ -37,13 +37,14 @@ witch --cmd=<shell-command> [--watch="<glob>,..."] [--ignore="<glob>,..."] [--in
 
 Command-line args:
 
-Flag         | Description
------------- | -------
-`cmd`        | Shell command to execute after changes are detected
-`watch`      | Comma separated globs to watch (default: ".")
-`ignore`     | Comma separated globs to ignore (default: "")
-`interval`   | Scan interval in milliseconds (default: 400)
-`no-spinner` | Disable fancy terminal spinner (default: false)
+Flag             | Description
+---------------- | -------
+`cmd`            | Shell command to execute after changes are detected
+`watch`          | Comma separated globs to watch (default: ".")
+`ignore`         | Comma separated globs to ignore (default: "")
+`interval`       | Scan interval in milliseconds (default: 400)
+`max-token-size` | Max output token size in bytes (default: 2048000)
+`no-spinner`     | Disable fancy terminal spinner (default: false)
 
 ## Globbing
 
