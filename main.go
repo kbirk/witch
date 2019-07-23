@@ -21,7 +21,7 @@ import (
 
 const (
 	name    = "witch"
-	version = "0.2.8"
+	version = "0.2.9"
 )
 
 var (
@@ -36,7 +36,7 @@ var (
 	ready         = make(chan bool, 1)
 	mu            = &sync.Mutex{}
 	prettyWriter  = writer.NewPretty(name, os.Stdout)
-	cmdWriter     = writer.NewCmd(os.Stdout)
+	cmdWriter     = writer.NewCmd(name, os.Stdout)
 	spin          = spinner.New(prettyWriter)
 )
 

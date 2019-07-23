@@ -13,6 +13,12 @@ import (
 	"github.com/unchartedsoftware/witch/cursor"
 )
 
+const (
+	// When the child side of the pty is closed when it dies, the subsequent
+	// read on ptmx is expected to fail.
+	ptyErr = "read /dev/ptmx: input/output error"
+)
+
 var (
 	mu = &sync.Mutex{}
 )
@@ -37,20 +43,25 @@ func (w *PrettyWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// WriteStringf writes the provided formatted string to the underlying
-// interface.
-func (w *PrettyWriter) WriteStringf(format string, args ...interface{}) {
+func writeStringf(n string, file *os.File, format string, args ...interface{}) {
 	stamp := color.HiBlackString("[%s]", time.Now().Format(time.Stamp))
-	name := color.GreenString("[%s]", w.name)
+	name := color.GreenString("[%s]", n)
 	wand := fmt.Sprintf("%s%s", color.GreenString("--"), color.MagentaString("⭑"))
 	msg := color.HiBlackString("%s", fmt.Sprintf(format, args...))
 	mu.Lock()
-	fmt.Fprintf(w.file, "%s\r%s %s %s %s", cursor.ClearLine, stamp, name, wand, msg)
+	fmt.Fprintf(file, "%s\r%s %s %s %s", cursor.ClearLine, stamp, name, wand, msg)
 	mu.Unlock()
+}
+
+// WriteStringf writes the provided formatted string to the underlying
+// interface.
+func (w *PrettyWriter) WriteStringf(format string, args ...interface{}) {
+	writeStringf(w.name, w.file, format, args...)
 }
 
 // CmdWriter represents a writer to log an output from the executed cmd.
 type CmdWriter struct {
+	name 	string
 	file         *os.File
 	proxy        *os.File
 	scanner      *bufio.Scanner
@@ -60,8 +71,9 @@ type CmdWriter struct {
 }
 
 // NewCmd instantiates and returns a new cmd writer.
-func NewCmd(file *os.File) *CmdWriter {
+func NewCmd(name string, file *os.File) *CmdWriter {
 	return &CmdWriter{
+		name: name,
 		file: file,
 		kill: make(chan bool),
 	}
@@ -93,8 +105,12 @@ func (w *CmdWriter) Proxy(f *os.File) {
 			line := w.scanner.Text()
 			w.Write([]byte(line + "\n"))
 		}
-		if w.scanner.Err() != nil {
-			fmt.Fprintf(w.file, "%s\r%s\n", cursor.ClearLine, w.scanner.Err())
+		err := w.scanner.Err()
+		if err != nil {
+			if err.Error() != ptyErr {
+				writeStringf(w.name, w.file, "%s%s\n", color.HiRedString("proxy writer error: "), err.Error())
+				os.Exit(3)
+			}
 		}
 		w.kill <- true
 	}()
