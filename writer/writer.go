@@ -61,7 +61,7 @@ func (w *PrettyWriter) WriteStringf(format string, args ...interface{}) {
 
 // CmdWriter represents a writer to log an output from the executed cmd.
 type CmdWriter struct {
-	name 	string
+	name         string
 	file         *os.File
 	proxy        *os.File
 	scanner      *bufio.Scanner

@@ -21,7 +21,7 @@ import (
 
 const (
 	name    = "witch"
-	version = "0.2.9"
+	version = "0.2.10"
 )
 
 var (
@@ -30,6 +30,7 @@ var (
 	cmd           string
 	watchInterval int
 	noSpinner     bool
+	stopOnNonZero bool
 	maxTokenSize  int
 	tickInterval  = 100
 	prev          *exec.Cmd
@@ -134,10 +135,20 @@ func executeCmd(cmd string) error {
 
 	// wait on process
 	go func() {
-		_, err := c.Process.Wait()
+		state, err := c.Process.Wait()
+
+		// check exit code
+		if stopOnNonZero && state.ExitCode() != 0 {
+			if stopOnNonZero {
+				prettyWriter.WriteStringf("exiting due to non-zero error code: %d\n", state.ExitCode())
+				os.Exit(3)
+			}
+		}
+
 		if err != nil {
 			prettyWriter.WriteStringf("cmd encountered error: %s\n", err)
 		}
+
 		// clear prev
 		mu.Lock()
 		prev = nil
@@ -189,6 +200,10 @@ func main() {
 			Name:  "no-spinner",
 			Usage: "Disable fancy terminal spinner",
 		},
+		cli.BoolFlag{
+			Name:  "stop-on-nonzero",
+			Usage: "Stop witch process if the provided cmd returns a non-zero exit code",
+		},
 	}
 	app.Action = func(c *cli.Context) error {
 
@@ -216,6 +231,9 @@ func main() {
 
 		// disable spinner
 		noSpinner = c.Bool("no-spinner")
+
+		// stop on non-zero
+		stopOnNonZero = c.Bool("stop-on-nonzero")
 
 		// max token size
 		maxTokenSize = c.Int("max-token-size")
