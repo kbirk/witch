@@ -13,12 +13,6 @@ import (
 	"github.com/kbirk/witch/cursor"
 )
 
-const (
-	// When the child side of the pty is closed when it dies, the subsequent
-	// read on ptmx is expected to fail.
-	ptyErr = "read /dev/ptmx: input/output error"
-)
-
 var (
 	mu = &sync.Mutex{}
 )
@@ -82,38 +76,6 @@ func NewCmd(name string, file *os.File) *CmdWriter {
 // MaxTokenSize sets the max token size for the underlying scanner.
 func (w *CmdWriter) MaxTokenSize(numBytes int) {
 	w.maxTokenSize = numBytes
-}
-
-// Proxy will forward the output from the provided os.File through the writer.
-func (w *CmdWriter) Proxy(f *os.File) {
-	mu.Lock()
-	// if we have an existing proxy, send EOF to kill it.
-	if w.proxy != nil {
-		// wait until its dead
-		<-w.kill
-	}
-	// create new proxy
-	w.proxy = f
-	w.scanner = bufio.NewScanner(w.proxy)
-
-	buf := make([]byte, w.maxTokenSize)
-	w.scanner.Buffer(buf, w.maxTokenSize)
-
-	mu.Unlock()
-	go func() {
-		for w.scanner.Scan() {
-			line := w.scanner.Text()
-			w.Write([]byte(line + "\n"))
-		}
-		err := w.scanner.Err()
-		if err != nil {
-			if err.Error() != ptyErr {
-				writeStringf(w.name, w.file, "%s%s\n", color.HiRedString("proxy writer error: "), err.Error())
-				os.Exit(3)
-			}
-		}
-		w.kill <- true
-	}()
 }
 
 // Write implements the standard Write interface.

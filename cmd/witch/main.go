@@ -9,7 +9,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/creack/pty"
 	"github.com/fatih/color"
 	"github.com/urfave/cli"
 
@@ -21,7 +20,7 @@ import (
 
 const (
 	name    = "witch"
-	version = "0.2.11"
+	version = "0.2.11-nopty"
 )
 
 var (
@@ -116,22 +115,19 @@ func executeCmd(cmd string) error {
 
 	// create command
 	c := exec.Command("/bin/sh", "-c", cmd)
-	//c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	// c.Stdin = os.Stdin
-	// c.Stdout = os.Stdout
-	// c.Stderr = os.Stderr
+	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	c.Stdin = os.Stdin
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
 
 	// log cmd
 	prettyWriter.WriteStringf("executing %s\n", color.MagentaString(cmd))
 
 	// run command in another process
-	f, err := pty.Start(c)
+	err := c.Start()
 	if err != nil {
 		return err
 	}
-
-	// proxy the output to the cmd writer
-	cmdWriter.Proxy(f)
 
 	// wait on process
 	go func() {
