@@ -3,7 +3,7 @@
 > Dead simple watching
 
 [![Build Status](https://travis-ci.org/unchartedsoftware/witch.svg?branch=master)](https://travis-ci.org/unchartedsoftware/witch)
-[![Go Report Card](https://goreportcard.com/badge/github.com/unchartedsoftware/witch)](https://goreportcard.com/report/github.com/unchartedsoftware/witch)
+[![Go Report Card](https://goreportcard.com/badge/github.com/kbirk/witch)](https://goreportcard.com/report/github.com/kbirk/witch)
 
 <img width="600" src="https://rawgit.com/unchartedsoftware/witch/master/screenshot.gif" alt="screenshot" />
 
@@ -26,7 +26,7 @@ Requires the [Go](https://golang.org/) programming language binaries with the `G
 ## Installation
 
 ```bash
-go get github.com/unchartedsoftware/witch
+go get github.com/kbirk/witch
 ```
 
 ## Usage

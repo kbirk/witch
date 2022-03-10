@@ -6,7 +6,7 @@ import (
 
 	"github.com/pkg/errors"
 
-	"github.com/unchartedsoftware/witch/glob"
+	"github.com/kbirk/witch/glob"
 )
 
 const (

@@ -7,7 +7,7 @@ import (
 
 	"github.com/fatih/color"
 
-	"github.com/unchartedsoftware/witch/cursor"
+	"github.com/kbirk/witch/cursor"
 )
 
 var (

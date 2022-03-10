@@ -13,10 +13,10 @@ import (
 	"github.com/fatih/color"
 	"github.com/urfave/cli"
 
-	"github.com/unchartedsoftware/witch/graceful"
-	"github.com/unchartedsoftware/witch/spinner"
-	"github.com/unchartedsoftware/witch/watcher"
-	"github.com/unchartedsoftware/witch/writer"
+	"github.com/kbirk/witch/graceful"
+	"github.com/kbirk/witch/spinner"
+	"github.com/kbirk/witch/watcher"
+	"github.com/kbirk/witch/writer"
 )
 
 const (
