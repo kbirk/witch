@@ -20,7 +20,8 @@ const (
 )
 
 var (
-	mu = &sync.Mutex{}
+	mu                          = &sync.Mutex{}
+	shouldOverwritePreviousLine = false
 )
 
 // PrettyWriter represents a pretty formatteed writer
@@ -39,24 +40,68 @@ func NewPretty(name string, file *os.File) *PrettyWriter {
 
 // Write implements the standard Write interface.
 func (w *PrettyWriter) Write(p []byte) (int, error) {
-	w.WriteStringf(string(p))
+	writeLineToKeepWithPrefix(w.name, w.file, string(p))
 	return len(p), nil
-}
-
-func writeStringf(n string, file *os.File, format string, args ...interface{}) {
-	stamp := color.HiBlackString("[%s]", time.Now().Format(time.Stamp))
-	name := color.GreenString("[%s]", n)
-	wand := fmt.Sprintf("%s%s", color.GreenString("--"), color.MagentaString("⭑"))
-	msg := color.HiBlackString("%s", fmt.Sprintf(format, args...))
-	mu.Lock()
-	fmt.Fprintf(file, "%s\r%s %s %s %s", cursor.ClearLine, stamp, name, wand, msg)
-	mu.Unlock()
 }
 
 // WriteStringf writes the provided formatted string to the underlying
 // interface.
 func (w *PrettyWriter) WriteStringf(format string, args ...interface{}) {
-	writeStringf(w.name, w.file, format, args...)
+	w.Write([]byte(fmt.Sprintf(format, args...)))
+}
+
+// Write implements the standard Write interface.
+func (w *PrettyWriter) WriteAndFlagToReplace(p []byte) (int, error) {
+	writeLineToBeReplacedWithPrefix(w.name, w.file, string(p))
+	return len(p), nil
+}
+
+func writeString(file *os.File, str string) {
+	if shouldOverwritePreviousLine {
+		// In case the witch process is wrapped by some parent process with a log prefix (ex. docker compose)
+		// we want to maintain any existing log prefix and only overwrite the rest of the line.
+		// So we move up, clear and then write the new line.
+		fmt.Fprintf(file, "%s\r%s", cursor.ClearLine, str)
+	} else {
+		fmt.Fprintf(file, "%s", str)
+	}
+}
+
+func getLogPrefix(n string) string {
+	stamp := color.HiBlackString("[%s]", time.Now().Format(time.Stamp))
+	name := color.GreenString("[%s]", n)
+	wand := fmt.Sprintf("%s%s", color.GreenString("--"), color.MagentaString("⭑"))
+	return fmt.Sprintf("%s %s %s", stamp, name, wand)
+}
+
+func writeLineToKeepWithPrefix(name string, file *os.File, format string, args ...interface{}) {
+	msg := color.HiBlackString("%s", fmt.Sprintf(format, args...))
+	output := fmt.Sprintf("%s %s", getLogPrefix(name), msg)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	writeString(file, output)
+	shouldOverwritePreviousLine = false
+}
+
+func writeLineToBeReplacedWithPrefix(name string, file *os.File, format string, args ...interface{}) {
+	msg := color.HiBlackString("%s", fmt.Sprintf(format, args...))
+	output := fmt.Sprintf("%s %s", getLogPrefix(name), msg)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	writeString(file, output)
+	shouldOverwritePreviousLine = true // set that we should replace this line on the next write
+}
+
+func writeLineToKeepWithoutPrefix(file *os.File, output string) {
+	mu.Lock()
+	defer mu.Unlock()
+
+	writeString(file, output)
+	shouldOverwritePreviousLine = false
 }
 
 // CmdWriter represents a writer to log an output from the executed cmd.
@@ -68,6 +113,7 @@ type CmdWriter struct {
 	maxTokenSize int
 	buffer       string
 	kill         chan bool
+	mu           *sync.Mutex
 }
 
 // NewCmd instantiates and returns a new cmd writer.
@@ -76,6 +122,7 @@ func NewCmd(name string, file *os.File) *CmdWriter {
 		name: name,
 		file: file,
 		kill: make(chan bool),
+		mu:   &sync.Mutex{},
 	}
 }
 
@@ -86,7 +133,7 @@ func (w *CmdWriter) MaxTokenSize(numBytes int) {
 
 // Proxy will forward the output from the provided os.File through the writer.
 func (w *CmdWriter) Proxy(f *os.File) {
-	mu.Lock()
+	w.mu.Lock()
 	// if we have an existing proxy, send EOF to kill it.
 	if w.proxy != nil {
 		// wait until its dead
@@ -99,16 +146,16 @@ func (w *CmdWriter) Proxy(f *os.File) {
 	buf := make([]byte, w.maxTokenSize)
 	w.scanner.Buffer(buf, w.maxTokenSize)
 
-	mu.Unlock()
+	w.mu.Unlock()
 	go func() {
 		for w.scanner.Scan() {
 			line := w.scanner.Text()
-			w.Write([]byte(line + "\n"))
+			w.write([]byte(line + "\n"))
 		}
 		err := w.scanner.Err()
 		if err != nil {
 			if err.Error() != ptyErr {
-				writeStringf(w.name, w.file, "%s%s\n", color.HiRedString("proxy writer error: "), err.Error())
+				writeLineToKeepWithPrefix(w.name, w.file, "%s%s\n", color.HiRedString("proxy writer error: "), err.Error())
 				os.Exit(3)
 			}
 		}
@@ -117,8 +164,9 @@ func (w *CmdWriter) Proxy(f *os.File) {
 }
 
 // Write implements the standard Write interface.
-func (w *CmdWriter) Write(p []byte) (int, error) {
-	mu.Lock()
+func (w *CmdWriter) write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	// append to buffer
 	w.buffer += string(p)
 	for {
@@ -127,23 +175,22 @@ func (w *CmdWriter) Write(p []byte) (int, error) {
 			// no endline
 			break
 		}
-		fmt.Fprintf(w.file, "%s\r%s", cursor.ClearLine, w.buffer[0:index+1])
+		writeLineToKeepWithoutPrefix(w.file, fmt.Sprintf("%s", w.buffer[0:index+1]))
 		w.buffer = w.buffer[index+1:]
 	}
-	mu.Unlock()
 	return len(p), nil
 }
 
 // Flush writes any buffered data to the underlying io.Writer.
 func (w *CmdWriter) Flush() error {
-	_, err := w.Write([]byte(w.buffer))
+	_, err := w.write([]byte(w.buffer))
 	if err != nil {
 		return err
 	}
-	mu.Lock()
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	if len(w.buffer) > 0 {
-		fmt.Fprintf(w.file, "%s\r%s\n", cursor.ClearLine, w.buffer)
+		writeLineToKeepWithoutPrefix(w.file, fmt.Sprintf("%s\n", w.buffer))
 	}
-	mu.Unlock()
 	return nil
 }

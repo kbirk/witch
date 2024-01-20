@@ -2,12 +2,12 @@ package spinner
 
 import (
 	"fmt"
-	"io"
 	"math/rand"
 
 	"github.com/fatih/color"
 
 	"github.com/kbirk/witch/cursor"
+	"github.com/kbirk/witch/writer"
 )
 
 var (
@@ -39,17 +39,19 @@ var (
 		"                    ¸,",
 		"                     ,",
 	}
-	colorHash = magicHash([]string{"`", "°", "º", "¤", "ø", ",", "¸"})
+	// MagicLength is the number of chars in the magic string
+	MagicLength = len(frames[len(frames)-1])
+	colorHash   = magicHash([]string{"`", "°", "º", "¤", "ø", ",", "¸"})
 )
 
 // Spinner represents a spinning console output.
 type Spinner struct {
 	c int
-	w io.Writer
+	w *writer.PrettyWriter
 }
 
 // New instantiates and returns a new spinner struct.
-func New(writer io.Writer) *Spinner {
+func New(writer *writer.PrettyWriter) *Spinner {
 	return &Spinner{
 		w: writer,
 	}
@@ -61,7 +63,7 @@ func (s *Spinner) Tick(count uint64) {
 	magic := fmt.Sprintf("%s%s",
 		cursor.Hide,
 		castMagic(frames[s.c]))
-	s.w.Write([]byte(magic))
+	s.w.WriteAndFlagToReplace([]byte(magic))
 }
 
 // Done clears the cursor.
@@ -69,7 +71,7 @@ func (s *Spinner) Done() {
 	goodbye := fmt.Sprintf("watch terminated %s%s\n",
 		color.GreenString("✘"),
 		cursor.Show)
-	s.w.Write([]byte(goodbye))
+	s.w.WriteStringf(goodbye)
 }
 
 func magicHash(strs []string) map[string][]string {

@@ -21,7 +21,7 @@ import (
 
 const (
 	name    = "witch"
-	version = "0.2.11"
+	version = "0.2.12"
 )
 
 var (
@@ -269,6 +269,7 @@ func main() {
 		// gracefully shutdown cmd process on exit
 		graceful.OnSignal(func() {
 			// kill process
+			prettyWriter.WriteStringf("\r") // hide the ^C
 			killCmd()
 			spin.Done()
 			os.Exit(0)
