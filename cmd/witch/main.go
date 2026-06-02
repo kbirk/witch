@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,7 +12,6 @@ import (
 
 	"github.com/creack/pty"
 	"github.com/fatih/color"
-	"github.com/urfave/cli"
 
 	"github.com/kbirk/witch/graceful"
 	"github.com/kbirk/witch/spinner"
@@ -21,7 +21,7 @@ import (
 
 const (
 	name    = "witch"
-	version = "0.2.12"
+	version = "0.2.13"
 )
 
 var (
@@ -49,20 +49,20 @@ func createLogo() string {
 		color.HiBlackString("version %s\n\n", version)
 }
 
-func fileChangeString(path string, event string) string {
+func fileChangeString(path string, event watcher.EventType) string {
 	switch event {
 	case watcher.Added:
 		return fmt.Sprintf("%s %s",
 			color.HiBlackString(path),
-			color.GreenString(event))
+			color.GreenString("added"))
 	case watcher.Removed:
 		return fmt.Sprintf("%s %s",
 			color.HiBlackString(path),
-			color.RedString(event))
+			color.RedString("removed"))
 	}
 	return fmt.Sprintf("%s %s",
 		color.HiBlackString(path),
-		color.BlueString(event))
+		color.BlueString("changed"))
 }
 
 func fileCountString(count uint64) string {
@@ -116,10 +116,6 @@ func executeCmd(cmd string) error {
 
 	// create command
 	c := exec.Command("/bin/sh", "-c", cmd)
-	//c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	// c.Stdin = os.Stdin
-	// c.Stdout = os.Stdout
-	// c.Stderr = os.Stderr
 
 	// log cmd
 	prettyWriter.WriteStringf("executing %s\n", color.MagentaString(cmd))
@@ -165,205 +161,162 @@ func executeCmd(cmd string) error {
 }
 
 func main() {
-	app := cli.NewApp()
-	app.Name = name
-	app.Version = version
-	app.Usage = "Dead simple watching"
-	app.UsageText = "witch --cmd=<shell-command> [--watch=\"<glob>,...\"] [--ignore=\"<glob>,...\"] [--interval=<milliseconds>]"
-	app.Flags = []cli.Flag{
-		cli.StringFlag{
-			Name:  "cmd",
-			Value: "",
-			Usage: "Shell command to run after detected changes",
-		},
-		cli.StringFlag{
-			Name:  "watch",
-			Value: ".",
-			Usage: "Comma separated file and directory globs to watch",
-		},
-		cli.StringFlag{
-			Name:  "ignore",
-			Value: "",
-			Usage: "Comma separated file and directory globs to ignore",
-		},
-		cli.IntFlag{
-			Name:  "interval",
-			Value: 400,
-			Usage: "Watch scan interval, in milliseconds",
-		},
-		cli.IntFlag{
-			Name:  "max-token-size",
-			Value: 1024 * 1000 * 2,
-			Usage: "Max output token size, in bytes",
-		},
-		cli.BoolFlag{
-			Name:  "no-spinner",
-			Usage: "Disable fancy terminal spinner",
-		},
-		cli.BoolFlag{
-			Name:  "stop-on-nonzero",
-			Usage: "Stop witch process if the provided cmd returns a non-zero exit code",
-		},
+
+	watchStr := ""
+	ignoreStr := ""
+
+	flag.StringVar(&cmd, "cmd", "", "Shell command to run after detected changes")
+	flag.StringVar(&watchStr, "watch", ".", "Comma separated file and directory globs to watch")
+	flag.StringVar(&ignoreStr, "ignore", "", "Comma separated file and directory globs to ignore")
+	flag.IntVar(&watchInterval, "interval", 400, "Watch scan interval, in milliseconds")
+	flag.IntVar(&maxTokenSize, "max-token-size", 1024*1000*2, "Max output token size, in bytes")
+	flag.BoolVar(&noSpinner, "no-spinner", false, "Disable fancy terminal spinner")
+	flag.BoolVar(&stopOnNonZero, "stop-on-nonzero", false, "Stop witch process if the provided cmd returns a non-zero exit code")
+
+	flag.Parse()
+
+	if cmd == "" {
+		os.Stderr.WriteString("No `--cmd` argument provided, Set command to execute with `--cmd=\"<shell command>\"`\n")
+		os.Exit(1)
 	}
-	app.Action = func(c *cli.Context) error {
 
-		// validate command line flags
+	// watch targets are optional
+	if watchStr == "" {
+		os.Stderr.WriteString("No `--watch` arguments provided. Set watch targets with `--watch=\"<comma>,<separated>,<globs>...\"`\n")
+		os.Exit(2)
+	}
+	watch = splitAndTrim(watchStr)
 
-		// ensure we have a command
-		if c.String("cmd") == "" {
-			return cli.NewExitError("No `--cmd` argument provided, Set command to execute with `--cmd=\"<shell command>\"`", 1)
-		}
-		cmd = c.String("cmd")
+	// ignores are optional
+	if ignoreStr != "" {
+		ignore = splitAndTrim(ignoreStr)
+	}
 
-		// watch targets are optional
-		if c.String("watch") == "" {
-			return cli.NewExitError("No `--watch` arguments provided. Set watch targets with `--watch=\"<comma>,<separated>,<globs>...\"`", 2)
-		}
-		watch = splitAndTrim(c.String("watch"))
+	// set token size
+	cmdWriter.MaxTokenSize(maxTokenSize)
 
-		// ignores are optional
-		if c.String("ignore") != "" {
-			ignore = splitAndTrim(c.String("ignore"))
-		}
+	// print logo
+	fmt.Fprintf(os.Stdout, createLogo())
 
-		// watchInterval is optional
-		watchInterval = c.Int("interval")
+	// create the watcher
+	w := watcher.New()
 
-		// disable spinner
-		noSpinner = c.Bool("no-spinner")
+	// add watches
+	for _, arg := range watch {
+		prettyWriter.WriteStringf("watching %s\n", color.BlueString(arg))
+		w.Watch(arg)
+	}
 
-		// stop on non-zero
-		stopOnNonZero = c.Bool("stop-on-nonzero")
+	// add ignores first
+	for _, arg := range ignore {
+		prettyWriter.WriteStringf("ignoring %s\n", color.RedString(arg))
+		w.Ignore(arg)
+	}
 
-		// max token size
-		maxTokenSize = c.Int("max-token-size")
+	// check for initial target count
+	numTargets, err := w.NumTargets()
+	if err != nil {
+		os.Stderr.WriteString(fmt.Sprintf("Failed to run initial scan: %s\n", err))
+		os.Exit(3)
+	}
+	prettyWriter.WriteStringf("%s\n", fileCountString(numTargets))
 
-		// set token size
-		cmdWriter.MaxTokenSize(maxTokenSize)
+	// gracefully shutdown cmd process on exit
+	graceful.OnSignal(func() {
+		// kill process
+		prettyWriter.WriteStringf("\r") // hide the ^C
+		killCmd()
+		spin.Done()
+		os.Exit(0)
+	})
 
-		// print logo
-		fmt.Fprintf(os.Stdout, createLogo())
+	// flag that we are ready to launch process
+	ready <- true
 
-		// create the watcher
-		w := watcher.New()
+	// launch cmd process
+	err = executeCmd(cmd)
+	if err != nil {
+		prettyWriter.WriteStringf("failed to run cmd: %s\n", err)
+	}
 
-		// add watches
-		for _, arg := range watch {
-			prettyWriter.WriteStringf("watching %s\n", color.BlueString(arg))
-			w.Watch(arg)
-		}
+	// track which action to take
+	nextWatch := watchInterval
+	nextTick := tickInterval
 
-		// add ignores first
-		for _, arg := range ignore {
-			prettyWriter.WriteStringf("ignoring %s\n", color.RedString(arg))
-			w.Ignore(arg)
-		}
+	// start scan loop
+	for {
+		if nextWatch == watchInterval {
+			// prev number targets
+			prevTargets := numTargets
 
-		// check for initial target count
-		numTargets, err := w.NumTargets()
-		if err != nil {
-			return cli.NewExitError(fmt.Sprintf("Failed to run initial scan: %s", err), 3)
-		}
-		prettyWriter.WriteStringf("%s\n", fileCountString(numTargets))
+			// check if anything has changed
+			events, err := w.ScanForEvents()
+			if err != nil {
+				prettyWriter.WriteStringf("failed to run scan: %s\n", err)
+			}
+			// log changes
+			for _, event := range events {
+				prettyWriter.WriteStringf("%s\n", fileChangeString(event.Path, event.Type))
+				// update num targets
+				if event.Type == watcher.Added {
+					numTargets++
+				}
+				if event.Type == watcher.Removed {
+					numTargets--
+				}
+			}
 
-		// gracefully shutdown cmd process on exit
-		graceful.OnSignal(func() {
-			// kill process
-			prettyWriter.WriteStringf("\r") // hide the ^C
-			killCmd()
-			spin.Done()
-			os.Exit(0)
-		})
+			// log new target count
+			if prevTargets != numTargets {
+				prettyWriter.WriteStringf("%s\n", fileCountString(numTargets))
+			}
 
-		// flag that we are ready to launch process
-		ready <- true
-
-		// launch cmd process
-		err = executeCmd(cmd)
-		if err != nil {
-			prettyWriter.WriteStringf("failed to run cmd: %s\n", err)
-		}
-
-		// track which action to take
-		nextWatch := watchInterval
-		nextTick := tickInterval
-
-		// start scan loop
-		for {
-			if nextWatch == watchInterval {
-				// prev number targets
-				prevTargets := numTargets
-
-				// check if anything has changed
-				events, err := w.ScanForEvents()
+			// if so, execute command
+			if len(events) > 0 {
+				err := executeCmd(cmd)
 				if err != nil {
-					prettyWriter.WriteStringf("failed to run scan: %s\n", err)
-				}
-				// log changes
-				for _, event := range events {
-					prettyWriter.WriteStringf("%s\n", fileChangeString(event.Path, event.Type))
-					// update num targets
-					if event.Type == watcher.Added {
-						numTargets++
-					}
-					if event.Type == watcher.Removed {
-						numTargets--
-					}
-				}
-
-				// log new target count
-				if prevTargets != numTargets {
-					prettyWriter.WriteStringf("%s\n", fileCountString(numTargets))
-				}
-
-				// if so, execute command
-				if len(events) > 0 {
-					err := executeCmd(cmd)
-					if err != nil {
-						prettyWriter.WriteStringf("failed to run cmd: %s\n", err)
-					}
+					prettyWriter.WriteStringf("failed to run cmd: %s\n", err)
 				}
 			}
-
-			var sleep int
-
-			if !noSpinner {
-				// spinner enabled
-
-				if nextTick == tickInterval {
-					// spin ticker
-					spin.Tick(numTargets)
-				}
-
-				if nextTick < nextWatch {
-					// next iter is tick
-					sleep = nextTick
-					nextWatch -= nextTick
-					// reset tick
-					nextTick = tickInterval
-				} else if nextTick > nextWatch {
-					// next iter is watch
-					sleep = nextWatch
-					nextTick -= nextWatch
-					// reset watch
-					nextWatch = watchInterval
-				} else {
-					// next iter is iether
-					sleep = nextTick
-					// reset
-					nextTick = tickInterval
-					nextWatch = watchInterval
-				}
-
-			} else {
-				// spinner disabled
-				sleep = watchInterval
-			}
-
-			// sleep
-			time.Sleep(time.Millisecond * time.Duration(sleep))
 		}
+
+		var sleep int
+
+		if !noSpinner {
+			// spinner enabled
+
+			if nextTick == tickInterval {
+				// spin ticker
+				spin.Tick(numTargets)
+			}
+
+			if nextTick < nextWatch {
+				// next iter is tick
+				sleep = nextTick
+				nextWatch -= nextTick
+				// reset tick
+				nextTick = tickInterval
+			} else if nextTick > nextWatch {
+				// next iter is watch
+				sleep = nextWatch
+				nextTick -= nextWatch
+				// reset watch
+				nextWatch = watchInterval
+			} else {
+				// next iter is iether
+				sleep = nextTick
+				// reset
+				nextTick = tickInterval
+				nextWatch = watchInterval
+			}
+
+		} else {
+			// spinner disabled
+			sleep = watchInterval
+		}
+
+		// sleep
+		time.Sleep(time.Millisecond * time.Duration(sleep))
 	}
-	// run app
-	app.Run(os.Args)
+
 }

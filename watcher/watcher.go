@@ -9,13 +9,15 @@ import (
 	"github.com/kbirk/witch/glob"
 )
 
+type EventType int
+
 const (
 	// Added represents a file creation event.
-	Added = "added"
+	Added EventType = iota
 	// Changed represents a file change event.
-	Changed = "changed"
+	Changed
 	// Removed represents a file removal event.
-	Removed = "removed"
+	Removed
 )
 
 // Watcher represents a simple struct for scanning and checking for any changes
@@ -28,7 +30,7 @@ type Watcher struct {
 
 // Event represents a single detected file event.
 type Event struct {
-	Type string
+	Type EventType
 	Path string
 }
 
@@ -70,7 +72,7 @@ func (w *Watcher) NumTargets() (uint64, error) {
 }
 
 func (w *Watcher) scanIgnores(args []string) ([]string, error) {
-	var ignores []string
+	ignores := make([]string, 0, len(args))
 	for _, arg := range args {
 		// expand the glob
 		files, err := glob.Glob(nil, arg, nil, false)
@@ -86,7 +88,11 @@ func (w *Watcher) scanIgnores(args []string) ([]string, error) {
 }
 
 func (w *Watcher) scanWatches(args []string, ignores []string) (map[string]os.FileInfo, error) {
-	watches := make(map[string]os.FileInfo)
+	capacity := len(args)
+	if len(w.prev) > capacity {
+		capacity = len(w.prev)
+	}
+	watches := make(map[string]os.FileInfo, capacity)
 	for _, arg := range args {
 		// expand the glob
 		_, err := glob.Glob(watches, arg, ignores, true)

@@ -16,7 +16,8 @@ import (
 const (
 	// When the child side of the pty is closed when it dies, the subsequent
 	// read on ptmx is expected to fail.
-	ptyErr = "read /dev/ptmx: input/output error"
+	ptyErr                = "read /dev/ptmx: input/output error"
+	initialScanBufferSize = 64 * 1024
 )
 
 var (
@@ -108,21 +109,19 @@ func writeLineToKeepWithoutPrefix(file *os.File, output string) {
 type CmdWriter struct {
 	name         string
 	file         *os.File
-	proxy        *os.File
-	scanner      *bufio.Scanner
 	maxTokenSize int
 	buffer       string
-	kill         chan bool
+	done         chan struct{}
 	mu           *sync.Mutex
 }
 
 // NewCmd instantiates and returns a new cmd writer.
 func NewCmd(name string, file *os.File) *CmdWriter {
 	return &CmdWriter{
-		name: name,
-		file: file,
-		kill: make(chan bool),
-		mu:   &sync.Mutex{},
+		name:         name,
+		file:         file,
+		maxTokenSize: bufio.MaxScanTokenSize,
+		mu:           &sync.Mutex{},
 	}
 }
 
@@ -134,32 +133,41 @@ func (w *CmdWriter) MaxTokenSize(numBytes int) {
 // Proxy will forward the output from the provided os.File through the writer.
 func (w *CmdWriter) Proxy(f *os.File) {
 	w.mu.Lock()
-	// if we have an existing proxy, send EOF to kill it.
-	if w.proxy != nil {
-		// wait until its dead
-		<-w.kill
+	previousDone := w.done
+	w.mu.Unlock()
+
+	if previousDone != nil {
+		<-previousDone
 	}
-	// create new proxy
-	w.proxy = f
-	w.scanner = bufio.NewScanner(w.proxy)
 
-	buf := make([]byte, w.maxTokenSize)
-	w.scanner.Buffer(buf, w.maxTokenSize)
+	scanner := bufio.NewScanner(f)
+	maxTokenSize := w.maxTokenSize
+	if maxTokenSize <= 0 {
+		maxTokenSize = bufio.MaxScanTokenSize
+	}
+	initialSize := initialScanBufferSize
+	if maxTokenSize < initialSize {
+		initialSize = maxTokenSize
+	}
+	scanner.Buffer(make([]byte, 0, initialSize), maxTokenSize)
+	done := make(chan struct{})
 
+	w.mu.Lock()
+	w.done = done
 	w.mu.Unlock()
 	go func() {
-		for w.scanner.Scan() {
-			line := w.scanner.Text()
+		defer close(done)
+		for scanner.Scan() {
+			line := scanner.Text()
 			w.write([]byte(line + "\n"))
 		}
-		err := w.scanner.Err()
+		err := scanner.Err()
 		if err != nil {
 			if err.Error() != ptyErr {
 				writeLineToKeepWithPrefix(w.name, w.file, "%s%s\n", color.HiRedString("proxy writer error: "), err.Error())
 				os.Exit(3)
 			}
 		}
-		w.kill <- true
 	}()
 }
 
@@ -170,12 +178,12 @@ func (w *CmdWriter) write(p []byte) (int, error) {
 	// append to buffer
 	w.buffer += string(p)
 	for {
-		index := strings.IndexAny(w.buffer, "\n")
+		index := strings.IndexByte(w.buffer, '\n')
 		if index == -1 {
 			// no endline
 			break
 		}
-		writeLineToKeepWithoutPrefix(w.file, fmt.Sprintf("%s", w.buffer[0:index+1]))
+		writeLineToKeepWithoutPrefix(w.file, w.buffer[0:index+1])
 		w.buffer = w.buffer[index+1:]
 	}
 	return len(p), nil
@@ -183,14 +191,11 @@ func (w *CmdWriter) write(p []byte) (int, error) {
 
 // Flush writes any buffered data to the underlying io.Writer.
 func (w *CmdWriter) Flush() error {
-	_, err := w.write([]byte(w.buffer))
-	if err != nil {
-		return err
-	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if len(w.buffer) > 0 {
-		writeLineToKeepWithoutPrefix(w.file, fmt.Sprintf("%s\n", w.buffer))
+		writeLineToKeepWithoutPrefix(w.file, w.buffer+"\n")
+		w.buffer = ""
 	}
 	return nil
 }
